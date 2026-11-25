@@ -123,26 +123,35 @@ function viewLogin() {
     } };
 }
 
+const periodName = m => m === 'all' ? 'all time' : /^\d{4}$/.test(m) ? m : monthName(m);
 const monthName = m => { const x = /^(\d{4})-(\d{2})$/.exec(m); return x ? ['January','February','March','April','May','June','July','August','September','October','November','December'][+x[2]-1] + ' ' + x[1] : m; };
 async function viewDashboard(month) {
   month = month || new Date().toISOString().slice(0, 7);
-  const s = await api('GET', 'summary?month=' + month);
+  const s = await api('GET', 'summary?period=' + month);
+  const kind = month === 'all' ? 'all' : /^\d{4}$/.test(month) ? 'year' : 'month';
+  const yr = (month === 'all' ? new Date().toISOString().slice(0, 4) : month.slice(0, 4));
+  const yrs = []; for (let y = +new Date().toISOString().slice(0, 4); y >= 2020; y--) yrs.push(y);
   S.badge = s.flaggedCount + s.cashPendingCount;
   const tot = s.byStatus.verified + s.byStatus.awaiting + s.byStatus.flagged;
   const pc = v => tot ? Math.round(v * 100 / tot) : 0;
   const rows = s.top.map(o => `<a class="tr" href="#/orders/${encodeURIComponent(o.code)}"><div class="c1"><b>${esc(o.code)}</b><div class="muted" style="font-size:13px">${esc(o.customer)}</div></div><div class="c r">${inr(o.total)}</div><div class="c r">${inr(o.verified)}</div><div class="c r"><b>${inr(o.outstanding)}</b></div><div class="c">${orderBadge(o)}</div></a>`).join('');
-  return { active: '#/', html: `<div class="head"><div><h1>Dashboard</h1><div class="muted">Every payment, matched to an order and checked against the bank.</div></div><div><label for="mo" class="muted" style="display:inline;margin-right:8px">Month</label><input id="mo" type="month" class="in" style="width:auto;min-height:44px" value="${esc(s.month)}"></div></div>
+  return { active: '#/', html: `<div class="head"><div><h1>Dashboard</h1><div class="muted">Every payment, matched to an order and checked against the bank.</div></div><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><select id="pk" class="in" style="width:auto;min-height:44px" aria-label="View by"><option value="month"${kind === 'month' ? ' selected' : ''}>Month</option><option value="year"${kind === 'year' ? ' selected' : ''}>Year</option><option value="all"${kind === 'all' ? ' selected' : ''}>Overall</option></select>${kind === 'month' ? `<input id="mo" type="month" class="in" style="width:auto;min-height:44px" value="${esc(s.month)}" aria-label="Month">` : kind === 'year' ? `<select id="yr" class="in" style="width:auto;min-height:44px" aria-label="Year">${yrs.map(y => `<option${String(y) === month ? ' selected' : ''}>${y}</option>`).join('')}</select>` : ''}</div></div>
   <div class="row" style="margin-bottom:16px">
    <div class="card kpi"><div class="l">Outstanding from clients</div><div class="v">${inr(s.outstanding)}</div><div class="muted">across ${s.openOrders} open order${s.openOrders === 1 ? '' : 's'}</div></div>
    <div class="card kpi"><div class="l">Awaiting bank verification</div><div class="v">${inr(s.awaiting)}</div><div class="muted">claimed by screenshot, not yet in a statement</div></div>
-   <div class="card kpi"><div class="l">Received in ${esc(monthName(s.month))}</div><div class="v">${inr(s.received)}</div><div class="muted">Online ${inr(s.receivedOnline)} · Cash ${inr(s.receivedCash)}</div></div>
+   <div class="card kpi"><div class="l">Received${s.month === 'all' ? ' overall' : ' in ' + esc(periodName(s.month))}</div><div class="v">${inr(s.received)}</div><div class="muted">Online ${inr(s.receivedOnline)} · Cash ${inr(s.receivedCash)}</div></div>
    <a class="card kpi alert" href="#/review"><div class="l">Needs your review</div><div class="v">${s.flaggedCount + s.cashPendingCount} item${s.flaggedCount + s.cashPendingCount === 1 ? '' : 's'}</div><div class="muted">${s.flaggedCount} flagged · ${s.cashPendingCount} cash to confirm</div></a></div>
   <div class="grid2"><div class="card a"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h2>Largest outstanding balances</h2><a href="#/orders" style="color:var(--acc);font-weight:600">View all orders</a></div>
    ${rows ? `<div class="tbl"><div class="tr h"><div class="c1">Order</div><div class="c r">Total</div><div class="c r">Verified</div><div class="c r">Outstanding</div><div class="c">Status</div></div>${rows}</div>` : '<p class="muted">No open orders with a balance. Create an order to start.</p>'}</div>
-   <div class="card b"><h2 style="margin-bottom:14px">${esc(monthName(s.month))} by status</h2><div class="bar" aria-hidden="true"><i style="width:${pc(s.byStatus.verified)}%;background:#12B76A"></i><i style="width:${pc(s.byStatus.awaiting)}%;background:#F79009"></i><i style="width:${pc(s.byStatus.flagged)}%;background:#D92D20"></i></div>
+   <div class="card b"><h2 style="margin-bottom:14px">${s.month === 'all' ? 'Overall' : esc(periodName(s.month))} by status</h2><div class="bar" aria-hidden="true"><i style="width:${pc(s.byStatus.verified)}%;background:#12B76A"></i><i style="width:${pc(s.byStatus.awaiting)}%;background:#F79009"></i><i style="width:${pc(s.byStatus.flagged)}%;background:#D92D20"></i></div>
    <div style="margin-top:16px;display:flex;flex-direction:column;gap:10px"><div style="display:flex;justify-content:space-between"><span><span class="dot" style="background:#12B76A"></span>Verified</span><b>${inr(s.byStatus.verified)}</b></div><div style="display:flex;justify-content:space-between"><span><span class="dot" style="background:#F79009"></span>Awaiting verification</span><b>${inr(s.byStatus.awaiting)}</b></div><div style="display:flex;justify-content:space-between"><span><span class="dot" style="background:#D92D20"></span>Flagged</span><b>${inr(s.byStatus.flagged)}</b></div></div>
    <div class="muted" style="border-top:1px solid var(--line);margin-top:18px;padding-top:14px;font-size:13px">Cash entries stay pending until a second person confirms them. <a href="#/statement" style="color:var(--acc);font-weight:600">Upload a bank statement</a> to verify the amounts waiting.</div></div></div>`,
-    after() { document.getElementById('mo').addEventListener('change', e => { if (e.target.value) { S.month = e.target.value; render(); } }); } };
+    after() {
+      const set = v => { S.month = v; render(); };
+      document.getElementById('pk').addEventListener('change', e => { const k = e.target.value; set(k === 'all' ? 'all' : k === 'year' ? yr : new Date().toISOString().slice(0, 7)); });
+      const mo = document.getElementById('mo'); if (mo) mo.addEventListener('change', e => { if (e.target.value) set(e.target.value); });
+      const ys = document.getElementById('yr'); if (ys) ys.addEventListener('change', e => set(e.target.value));
+    } };
 }
 
 async function viewOrders() {

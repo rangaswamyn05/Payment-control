@@ -432,12 +432,13 @@ async function route(req, res) {
   // ----- summary
   if (a === 'summary' && m === 'GET') {
     await authed(req, url, 'manager');
-    const month = /^\d{4}-\d{2}$/.test(url.searchParams.get('month') || '') ? url.searchParams.get('month') : new Date().toISOString().slice(0, 7);
+    const rawP = url.searchParams.get('period') || url.searchParams.get('month') || '';
+    const month = /^\d{4}-\d{2}$/.test(rawP) || /^\d{4}$/.test(rawP) || rawP === 'all' ? rawP : new Date().toISOString().slice(0, 7);
     const orders = await db.all('orders');
     const pays = await db.all('payments');
     const views = orders.map(o => orderView(o, pays));
     const open = views.filter(o => o.status === 'open');
-    const inMonth = pays.filter(p => (p.date || '').startsWith(month) && p.status !== 'rejected');
+    const inMonth = pays.filter(p => (month === 'all' || (p.date || '').startsWith(month)) && p.status !== 'rejected');
     const cnt = inMonth.filter(p => p.status !== 'flagged');
     const sum = f => r2(inMonth.filter(f).reduce((s, p) => s + p.amount, 0));
     const live = pays.filter(p => p.status !== 'rejected');
