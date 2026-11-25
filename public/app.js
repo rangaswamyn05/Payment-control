@@ -27,6 +27,8 @@ function statusBadge(p) {
   return `<span class="badge ${c}">${esc(t + extra)}</span>`;
 }
 function orderBadge(o) {
+  if (o.status === 'pending') return '<span class="badge">Pending approval</span>';
+  if (o.status === 'rejected') return '<span class="badge">Rejected</span>';
   if (o.status === 'closed') return '<span class="badge">Closed</span>';
   if (o.flaggedCount) return '<span class="badge bad">Flagged</span>';
   if (o.pendingCash) return '<span class="badge warn">Cash to confirm</span>';
@@ -89,6 +91,7 @@ function shell(active, inner) {
   const u = S.user; const mgr = RANK[u.role] >= RANK.manager;
   const items = [];
   if (mgr) items.push(['#/', 'Dashboard'], ['#/orders', 'Orders'], ['#/payments', 'Payments'], ['#/review', 'Review' + (S.badge ? `<span class="pill">${S.badge}</span>` : '')], ['#/statement', 'Statement']);
+  if (!mgr) items.push(['#/new-order', 'New order']);
   items.push(['#/add', 'Add payment'], ['#/mine', mgr ? 'My entries' : 'My submissions']);
   if (mgr) items.push(['#/audit', 'Audit log']);
   if (u.role === 'owner') items.push(['#/team', 'Team'], ['#/settings', 'Settings']);
@@ -131,7 +134,7 @@ async function viewDashboard(month) {
   const kind = month === 'all' ? 'all' : /^\d{4}$/.test(month) ? 'year' : 'month';
   const yr = (month === 'all' ? new Date().toISOString().slice(0, 4) : month.slice(0, 4));
   const yrs = []; for (let y = +new Date().toISOString().slice(0, 4); y >= 2020; y--) yrs.push(y);
-  S.badge = s.flaggedCount + s.cashPendingCount;
+  S.badge = s.flaggedCount + s.cashPendingCount + s.pendingOrders;
   const tot = s.byStatus.verified + s.byStatus.awaiting + s.byStatus.flagged;
   const pc = v => tot ? Math.round(v * 100 / tot) : 0;
   const rows = s.top.map(o => `<a class="tr" href="#/orders/${encodeURIComponent(o.code)}"><div class="c1"><b>${esc(o.code)}</b><div class="muted" style="font-size:13px">${esc(o.customer)}</div></div><div class="c r">${inr(o.total)}</div><div class="c r">${inr(o.verified)}</div><div class="c r"><b>${inr(o.outstanding)}</b></div><div class="c">${orderBadge(o)}</div></a>`).join('');
@@ -170,6 +173,15 @@ async function viewOrders() {
     } };
 }
 
+function viewNewOrder() {
+  if (S.newOrder) { const d = S.newOrder; return { active: '#/new-order', html: `<div style="max-width:520px;margin:0 auto"><div class="card" style="text-align:center;padding:32px 20px"><div style="width:56px;height:56px;border-radius:28px;background:var(--goodbg);color:var(--good);margin:0 auto 12px;display:flex;align-items:center;justify-content:center;font-size:28px" aria-hidden="true">✓</div><h1 style="font-size:24px">Sent for approval</h1><p class="muted"><b>${esc(d.code)}</b> for ${esc(d.customer)}<br>A manager must approve it before payments can be added.</p><div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:16px"><button class="btn p" data-act="anotherOrder">Create another</button><a class="btn" href="#/add">Add payment</a></div></div></div>` }; }
+  return { active: '#/new-order', html: `<div style="max-width:520px;margin:0 auto"><div class="head" style="margin-bottom:12px"><h1 style="font-size:24px">New order</h1></div><div class="card"><form id="nf"><div class="field"><label for="ocu">Client name</label><input id="ocu" class="in" required></div><div class="field"><label for="ot">Order total (₹)</label><input id="ot" class="in" inputmode="decimal" required></div><div class="field"><label for="oc">Order ID <span class="opt">(blank = automatic)</span></label><input id="oc" class="in" autocapitalize="characters"></div><div class="err" id="nerr" style="min-height:18px"></div><button class="btn p" type="submit" style="width:100%">Create order</button></form></div></div>`,
+    after() { document.getElementById('nf').addEventListener('submit', async e => {
+      e.preventDefault(); const er = document.getElementById('nerr'); er.textContent = '';
+      try { const r = await api('POST', 'orders', { code: document.getElementById('oc').value, customer: document.getElementById('ocu').value, total: document.getElementById('ot').value.replace(/,/g, '') }); S.newOrder = r.order; render(); } catch (ex) { er.textContent = ex.message; }
+    }); } };
+}
+
 function payActions(p, o) {
   const a = [];
   if (p.status === 'cash_pending') a.push(p.createdBy === S.user.id ? '<span class="muted" style="font-size:12px">You logged this, so someone else must confirm it</span>' : `<button class="btn s p" data-act="confirmCash" data-id="${p.id}">Confirm cash received</button>`);
@@ -204,11 +216,13 @@ async function viewPayments() {
 }
 
 async function viewReview() {
-  const [{ payments: all }] = await Promise.all([api('GET', 'payments')]);
+  const [{ payments: all }, { orders: allOrders }] = await Promise.all([api('GET', 'payments'), api('GET', 'orders')]);
+  const toApprove = allOrders.filter(o => o.status === 'pending');
   const cash = all.filter(p => p.status === 'cash_pending'), flags = all.filter(p => p.status === 'flagged'), wait = all.filter(p => p.status === 'client_reported');
-  S.badge = cash.length + flags.length;
+  S.badge = cash.length + flags.length + toApprove.length;
   const item = p => `<div style="border-top:1px solid #EEF2F6;padding:14px 0"><div style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px"><div><b>${inr(p.amount)}</b> · <a href="#/orders/${encodeURIComponent(p.orderCode)}" style="color:var(--acc);font-weight:600">${esc(p.orderCode)}</a><div class="muted" style="font-size:13px">${esc(p.customer)} · ${esc(MODE[p.mode])} · ${esc(fdate(p.date))} · logged by ${esc(p.createdByName)}</div></div>${statusBadge(p)}</div><div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">${p.imageId ? `<button class="btn s" data-act="showImg" data-id="${p.imageId}">View proof</button>` : ''}${payActions(p)}</div></div>`;
   return { active: '#/review', html: `<div class="head"><div><h1>Needs your review</h1><div class="muted">Cash can only be confirmed by someone other than the person who logged it.</div></div></div>
+  ${toApprove.length ? `<div class="card a" style="margin-bottom:16px"><h2>Orders to approve <span class="muted" style="font-weight:500">· ${toApprove.length}</span></h2><div class="muted" style="font-size:13px;margin-bottom:6px">Created by the sales team. Payments can be added only after you approve the order and its total.</div>${toApprove.map(o => `<div style="border-top:1px solid #EEF2F6;padding:14px 0;display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;align-items:center"><div><b>${esc(o.code)}</b> · ${esc(o.customer)}<div class="muted" style="font-size:13px">Total ${inr(o.total)}</div></div><div style="display:flex;gap:8px"><button class="btn s p" data-act="approveOrder" data-code="${esc(o.code)}">Approve</button><button class="btn s" data-act="rejectOrder" data-code="${esc(o.code)}">Reject</button></div></div>`).join('')}</div>` : ''}
   <div class="grid2"><div class="card a" style="flex-basis:480px"><h2>Cash to confirm <span class="muted" style="font-weight:500">· ${cash.length}</span></h2><div class="muted" style="font-size:13px;margin-bottom:6px">Reported by the client. The system cannot check cash, so a named person confirms it.</div>${cash.map(item).join('') || '<p class="muted">Nothing waiting.</p>'}</div>
   <div class="card a" style="flex-basis:480px"><h2>Flagged <span class="muted" style="font-weight:500">· ${flags.length}</span></h2><div class="muted" style="font-size:13px;margin-bottom:6px">Possible duplicates and payments with no matching credit in the bank statement.</div>${flags.map(item).join('') || '<p class="muted">Nothing flagged.</p>'}</div></div>
   <div class="card" style="margin-top:16px"><h2>Awaiting bank verification <span class="muted" style="font-weight:500">· ${wait.length}</span></h2><div class="muted" style="font-size:13px;margin-bottom:6px">Best way to clear these: <a href="#/statement" style="color:var(--acc);font-weight:600">upload the bank statement</a>. You can also verify one by hand with a note.</div>${wait.map(item).join('') || '<p class="muted">Nothing waiting.</p>'}</div>` };
@@ -358,7 +372,7 @@ function viewAdd() {
         clearTimeout(tm); const h = document.getElementById('ohint'); A.customer = ''; A.orderErr = '';
         if (!A.orderCode.trim()) { h.textContent = ''; return; }
         tm = setTimeout(async () => {
-          try { const r = await api('GET', 'orders/lookup/' + encodeURIComponent(A.orderCode.trim())); A.customer = r.customer; if (r.closed) { A.orderErr = 'That order is closed.'; A.customer = ''; } } catch (ex) { A.orderErr = ex.message; }
+          try { const r = await api('GET', 'orders/lookup/' + encodeURIComponent(A.orderCode.trim())); A.customer = r.customer; if (r.pending) { A.orderErr = 'That order is waiting for manager approval.'; A.customer = ''; } else if (r.rejected) { A.orderErr = 'That order was rejected by a manager.'; A.customer = ''; } else if (r.closed) { A.orderErr = 'That order is closed.'; A.customer = ''; } } catch (ex) { A.orderErr = ex.message; }
           h.className = A.orderErr ? 'err' : 'ok'; h.textContent = A.orderErr ? A.orderErr : 'Found: ' + A.customer;
         }, 350);
       }
@@ -429,6 +443,9 @@ const ACT = {
   async editTotal(el) { const v = await ask({ title: 'Change order total', label: 'New total (₹)', text: 'The change is recorded in the audit log.', ok: 'Save', minLen: 1 }); if (!v) return; try { await api('PATCH', `orders/${encodeURIComponent(el.dataset.code)}`, { total: v.replace(/,/g, '') }); toast('Total updated'); render(); } catch (ex) { toast(ex.message, true); } },
   mode(el) { S.add.mode = el.dataset.m; render(); },
   pickImg() { document.getElementById('fi').click(); },
+  async approveOrder(el) { try { await api('POST', `orders/${encodeURIComponent(el.dataset.code)}/approve`, {}); toast('Order approved'); render(); } catch (ex) { toast(ex.message, true); } },
+  async rejectOrder(el) { const reason = await ask({ title: 'Reject this order', label: 'Reason', ok: 'Reject', danger: true }); if (!reason) return; try { await api('POST', `orders/${encodeURIComponent(el.dataset.code)}/reject`, { reason }); toast('Order rejected'); render(); } catch (ex) { toast(ex.message, true); } },
+  anotherOrder() { S.newOrder = null; render(); },
   addAnother() { S.add = newAdd(); render(); },
   async userToggle(el) { try { await api('PATCH', 'users/' + el.dataset.id, { active: el.dataset.active !== '1' }); render(); } catch (ex) { toast(ex.message, true); } },
   async userReset(el) { const pw = await ask({ title: 'Reset password', label: 'New password (at least 8 characters)', ok: 'Reset', minLen: 8 }); if (!pw) return; try { await api('PATCH', 'users/' + el.dataset.id, { password: pw }); toast('Password reset'); } catch (ex) { toast(ex.message, true); } },
@@ -451,6 +468,7 @@ async function render() {
     if (!a) { if (!mgr) return go('#/add'); v = await viewDashboard(S.month); }
     else if (a === 'login') { return go(mgr ? '#/' : '#/add'); }
     else if (a === 'add') v = viewAdd();
+    else if (a === 'new-order') v = viewNewOrder();
     else if (a === 'mine') v = await viewMine();
     else if (!mgr) return go('#/add');
     else if (a === 'orders') v = b ? await viewOrder(b) : await viewOrders();
@@ -463,7 +481,7 @@ async function render() {
     else return go('#/');
   } catch (ex) { if (my !== rid) return; v = { active: '', html: `<div class="note bad">${esc(ex.message)}</div><p><a class="btn" href="#/">Back to start</a></p>` }; }
   if (my !== rid || !S.user) return;
-  if (mgr && !S.badgeLoaded) { S.badgeLoaded = true; api('GET', 'summary').then(s => { S.badge = s.flaggedCount + s.cashPendingCount; document.querySelectorAll('.nav a[href="#/review"]').forEach(a => { a.innerHTML = 'Review' + (S.badge ? `<span class="pill">${S.badge}</span>` : ''); }); }).catch(() => { }); }
+  if (mgr && !S.badgeLoaded) { S.badgeLoaded = true; api('GET', 'summary').then(s => { S.badge = s.flaggedCount + s.cashPendingCount + s.pendingOrders; document.querySelectorAll('.nav a[href="#/review"]').forEach(a => { a.innerHTML = 'Review' + (S.badge ? `<span class="pill">${S.badge}</span>` : ''); }); }).catch(() => { }); }
   $app.innerHTML = shell(v.active, v.html);
   if (S.lastHash !== location.hash) { window.scrollTo(0, 0); S.lastHash = location.hash; }
   if (v.after) v.after();

@@ -3,7 +3,7 @@
 const db = require('./_lib/db');
 const A = require('./_lib/auth');
 const { parseUpi } = require('./_lib/parse');
-const { dispatch, validateUrl } = require('./_lib/connectors');
+const { dispatch, dispatchOrder, validateUrl } = require('./_lib/connectors');
 
 const RANK = { uploader: 1, manager: 2, owner: 3 };
 const VERIFIED = ['verified', 'cash_confirmed'];
@@ -274,9 +274,9 @@ async function route(req, res) {
       await authed(req, url, 'uploader');
       const o = (await db.all('orders')).find(x => lc(x.code) === lc(c));
       if (!o) throw new HttpErr(404, 'No order with that ID');
-      return send(res, 200, { code: o.code, customer: o.customer, closed: o.status === 'closed' });
+      return send(res, 200, { code: o.code, customer: o.customer, closed: o.status === 'closed', pending: o.status === 'pending', rejected: o.status === 'rejected' });
     }
-    const me = await authed(req, url, 'manager');
+    const me = await authed(req, url, !b && m === 'POST' ? 'uploader' : 'manager');
     const orders = await db.all('orders');
     if (!b && m === 'GET') {
       const pays = await db.all('payments');
@@ -291,9 +291,10 @@ async function route(req, res) {
       if (!code) { const n = orders.map(o => /^ORD-(\d+)$/.exec(o.code)).filter(Boolean).map(x => +x[1]); code = 'ORD-' + ((n.length ? Math.max(...n) : 1000) + 1); }
       if (!/^[A-Za-z0-9._-]{2,24}$/.test(code)) throw new HttpErr(400, 'Order ID can use letters, numbers, dot, dash and underscore');
       if (orders.some(o => lc(o.code) === lc(code))) throw new HttpErr(409, 'That order ID already exists');
-      const o = await db.insert('orders', { code, customer: String(body.customer).trim().slice(0, 80), total, status: 'open', note: String(body.note || '').slice(0, 200), createdBy: me.name });
-      await audit(me, 'order_created', 'order', o.code, `${o.customer}, total ${o.total}`);
-      return send(res, 200, { order: orderView(o, []) });
+      const o = await db.insert('orders', { code, customer: String(body.customer).trim().slice(0, 80), total, status: RANK[me.role] >= RANK.manager ? 'open' : 'pending', note: String(body.note || '').slice(0, 200), createdBy: me.name, createdById: me.id });
+      await audit(me, 'order_created', 'order', o.code, `${o.customer}, total ${o.total}${o.status === 'pending' ? ', waiting for manager approval' : ''}`);
+      if (o.status === 'open') for (const r of await dispatchOrder('order_created', o)) await audit(me, 'connector_' + (r.ok ? 'ok' : 'failed'), 'order', o.code, `${r.connector} order_created ${r.status || r.error || ''}`);
+      return send(res, 200, { order: RANK[me.role] >= RANK.manager ? orderView(o, []) : { code: o.code, customer: o.customer } });
     }
     const o = orders.find(x => lc(x.code) === lc(b));
     if (!o) throw new HttpErr(404, 'Order not found');
@@ -333,6 +334,15 @@ async function route(req, res) {
       const n = await db.update('orders', o.id, { status: 'closed', closedAt: new Date().toISOString() });
       return send(res, 200, { order: orderView(n, pays) });
     }
+    if ((c === 'approve' || c === 'reject') && m === 'POST') {
+      if (o.status !== 'pending') throw new HttpErr(400, 'This order is not waiting for approval');
+      const body = await readBody(req);
+      if (c === 'reject' && !String(body.reason || '').trim()) throw new HttpErr(400, 'Give a reason for rejecting');
+      const n = await db.update('orders', o.id, c === 'approve' ? { status: 'open', approvedBy: me.name, approvedAt: new Date().toISOString() } : { status: 'rejected', rejectedBy: me.name, rejectReason: String(body.reason).slice(0, 200) });
+      await audit(me, c === 'approve' ? 'order_approved' : 'order_rejected', 'order', o.code, c === 'approve' ? `total ${o.total}` : String(body.reason).slice(0, 200));
+      if (c === 'approve') for (const r of await dispatchOrder('order_approved', n)) await audit(me, 'connector_' + (r.ok ? 'ok' : 'failed'), 'order', o.code, `${r.connector} order_approved ${r.status || r.error || ''}`);
+      return send(res, 200, { order: orderView(n, pays) });
+    }
     if (c === 'reopen' && m === 'POST') {
       const n = await db.update('orders', o.id, { status: 'open' });
       await audit(me, 'order_reopened', 'order', o.code, '');
@@ -354,6 +364,8 @@ async function route(req, res) {
       const order = orders.find(o => lc(o.code) === lc(body.orderCode));
       if (!order) throw new HttpErr(400, 'No order with that ID. Check the order ID.');
       if (order.status === 'closed') throw new HttpErr(400, 'That order is closed.');
+      if (order.status === 'pending') throw new HttpErr(400, 'That order is waiting for manager approval.');
+      if (order.status === 'rejected') throw new HttpErr(400, 'That order was rejected by a manager.');
       const mode = lc(body.mode);
       if (!MODES.includes(mode)) throw new HttpErr(400, 'Choose UPI, bank transfer or cash');
       const amount = r2(body.amount);
@@ -446,6 +458,7 @@ async function route(req, res) {
       month,
       outstanding: r2(open.reduce((s, o) => s + o.outstanding, 0)),
       outstandingVerifiedOnly: r2(open.reduce((s, o) => s + o.outstandingVerified, 0)),
+      pendingOrders: views.filter(o => o.status === 'pending').length,
       openOrders: open.length, closedOrders: views.length - open.length,
       awaiting: r2(live.filter(p => UNVERIFIED.includes(p.status) && p.mode !== 'cash').reduce((s, p) => s + p.amount, 0)),
       received: r2(cnt.reduce((s, p) => s + p.amount, 0)),

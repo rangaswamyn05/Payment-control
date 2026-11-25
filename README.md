@@ -83,3 +83,11 @@ node test/serve.js        # local dev server on :8790
 ## Stack
 
 Static pages in `public/`, one serverless function in `api/index.js` (no dependencies), Supabase for storage, Google text detection for screenshots.
+
+
+## Order approval and the spreadsheet
+
+- The sales team (uploader role) creates orders. A manager or owner must approve each one on the Review screen before any payment can be added to it. Rejected orders need a written reason.
+- When an order is approved (or created by a manager), a row is appended to the **Orders** tab of your Google Sheet. Every payment event is appended to the **Payments** tab. The connector only appends; it never edits or deletes rows.
+- Setup: create a Google Cloud service account, share the sheet with its email as Editor, add tabs named `Orders` and `Payments`, then set in Vercel: `GOOGLE_SERVICE_ACCOUNT_EMAIL`, `GOOGLE_SERVICE_ACCOUNT_KEY` (the private key, with line breaks written as `\n`) and `SHEETS_ID`. Without these the connector stays off.
+- Tested against a mock Google only. It has not been run against a real sheet yet.

@@ -101,6 +101,32 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
   // audit
   r = await call('GET', 'audit?limit=500', null, mg); ok('audit log records actions', r.j.audit.length > 15 && r.j.audit.some(x => x.action === 'order_closed_override'));
 
+  r = await call('POST', 'orders', { customer: 'Sales test client', total: 50000 }, up); ok('sales team (uploader) creates an order, sees only code and client', r.s === 200 && !!r.j.order.code && r.j.order.total === undefined && r.j.order.customer === 'Sales test client');
+  const newCode = r.j.order.code;
+  ok('new sales order waits for approval', (await call('GET', 'orders/lookup/' + newCode, null, up)).j.pending === true);
+  ok('payment on an unapproved order refused', (await call('POST', 'payments', { orderCode: newCode, mode: 'cash', amount: 1000, date: '2026-11-20' }, up)).s === 400);
+  ok('uploader cannot approve', (await call('POST', 'orders/' + newCode + '/approve', {}, up)).s === 403);
+  ok('pending order not counted as outstanding', (await call('GET', 'summary', null, mg)).j.pendingOrders >= 1);
+  ok('manager approves the order', (await call('POST', 'orders/' + newCode + '/approve', {}, mg)).j.order.status === 'open');
+  ok('payment accepted after approval', (await call('POST', 'payments', { orderCode: newCode, mode: 'cash', amount: 1000, date: '2026-11-20' }, up)).s === 200);
+  r = await call('POST', 'orders', { customer: 'Bad client', total: 100 }, up);
+  ok('manager rejects an order with a reason', (await call('POST', 'orders/' + r.j.order.code + '/reject', {}, mg)).s === 400 && (await call('POST', 'orders/' + r.j.order.code + '/reject', { reason: 'Wrong total' }, mg)).j.order.status === 'rejected');
+  ok('approval is in the audit log', (await call('GET', 'audit', null, ow)).j.audit.some(e => e.action === 'order_approved'));
+  // Google Sheets connector against a mock Google
+  const gl = []; const crypto = require('crypto');
+  const gm = http.createServer((q, s) => { let d = ''; q.on('data', c => d += c); q.on('end', () => { gl.push({ u: q.url, h: q.headers, d }); s.setHeader('Content-Type', 'application/json'); s.end(q.url.startsWith('/token') ? '{"access_token":"tok123","expires_in":3600}' : '{}'); }); });
+  await new Promise(r2 => gm.listen(0, r2)); const gp = gm.address().port;
+  const kp = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+  process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL = 'svc@test.iam'; process.env.GOOGLE_SERVICE_ACCOUNT_KEY = kp.privateKey.export({ type: 'pkcs8', format: 'pem' }).replace(/\n/g, '\\n');
+  process.env.SHEETS_ID = 'sheet1'; process.env.GOOGLE_TOKEN_URL = 'http://localhost:' + gp + '/token'; process.env.SHEETS_API_BASE = 'http://localhost:' + gp;
+  r = await call('POST', 'orders', { customer: '=HYPERLINK("x")', total: 7000 }, up);
+  await call('POST', 'orders/' + r.j.order.code + '/approve', {}, mg);
+  const ap = gl.find(g => g.u.includes('/values/Orders'));
+  ok('approval appends the order to the Orders tab, with a Google sign-in', !!ap && ap.h.authorization === 'Bearer tok123' && gl.some(g => g.u.startsWith('/token') && g.d.includes('assertion=')));
+  const row = ap && JSON.parse(ap.d).values[0];
+  ok('row holds order id, client, total, approver; formula text is neutralised', row && row[2] === r.j.order.code && row[4] === '7000' && row[6] === 'Demo Manager' && row[3].startsWith("'="));
+  ok('uses append only', !!ap && ap.u.includes(':append') && !gl.some(g => /clear|delete/i.test(g.u)));
+  gm.close();
   console.log(bad ? '\n' + bad + ' FAILED' : '\nALL API TESTS PASSED');
   srv.close(); mock.close(); process.exit(bad ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
