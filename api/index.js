@@ -65,33 +65,57 @@ async function authed(req, url, min) {
 }
 
 // ---------- calculations ----------
+const isSystem = p => p.status === 'verified' && p.verifyMethod === 'statement';
+const isManual = p => p.status === 'cash_confirmed' || (p.status === 'verified' && p.verifyMethod !== 'statement');
 function sums(pays) {
-  const s = { verified: 0, unverified: 0, flagged: 0 };
+  const s = { verified: 0, unverified: 0, flagged: 0, validated: 0, manual: 0 };
   for (const p of pays) {
     if (VERIFIED.includes(p.status)) s.verified += p.amount;
     else if (UNVERIFIED.includes(p.status)) s.unverified += p.amount;
     else if (p.status === 'flagged') s.flagged += p.amount;
+    if (isSystem(p)) s.validated += p.amount; else if (isManual(p)) s.manual += p.amount;
   }
-  s.verified = r2(s.verified); s.unverified = r2(s.unverified); s.flagged = r2(s.flagged);
+  for (const k of Object.keys(s)) s[k] = r2(s[k]);
   return s;
+}
+
+const NOTE_MANUAL = 'Manually validated, not system validated';
+const NOTE_PROVIDE = 'Provide statements to validate';
+const NOTE_UNABLE = 'Unable to validate with the statements provided. Provide another statement.';
+function payNote(p) {
+  if (isSystem(p)) return 'Validated against the bank statement';
+  if (isManual(p)) return NOTE_MANUAL;
+  if (p.status === 'client_reported') return p.stmtUnableAt ? NOTE_UNABLE : NOTE_PROVIDE;
+  if (p.status === 'cash_pending') return 'Waiting for the owner to approve cash';
+  return '';
 }
 
 function orderView(o, allPays) {
   const pays = allPays.filter(p => p.orderCode === o.code);
   const s = sums(pays);
+  const live = pays.filter(p => p.status !== 'rejected');
   const claimed = r2(s.verified + s.unverified);
+  const waiting = live.filter(p => p.status === 'client_reported');
+  let validation = 'none';
+  if (waiting.length) validation = waiting.some(p => p.stmtUnableAt) ? 'unable' : 'pending';
+  else if (live.some(p => p.status === 'cash_pending')) validation = 'owner';
+  else if (claimed > 0) validation = s.manual > 0 ? 'manual' : 'validated';
   return {
     id: o.id, code: o.code, customer: o.customer, total: o.total, status: o.status, note: o.note || '', created: o.created, demo: !!o.demo,
+    customerExtra: o.customerExtra || {}, createdBy: o.createdBy || '', rejectReason: o.rejectReason || '', modifications: o.modifications || [],
     verified: s.verified, awaiting: s.unverified, flagged: s.flagged,
+    collected: claimed, validated: s.validated, manual: s.manual, notValidated: s.unverified, validation,
+    validationNote: validation === 'unable' ? NOTE_UNABLE : validation === 'pending' ? NOTE_PROVIDE : validation === 'owner' ? 'Cash waiting for owner approval' : validation === 'manual' ? NOTE_MANUAL : '',
     outstanding: r2(Math.max(0, o.total - claimed)),
     outstandingVerified: r2(Math.max(0, o.total - s.verified)),
-    payments: pays.length,
+    payments: live.length,
     pendingCash: pays.filter(p => p.status === 'cash_pending').length,
+    pendingOwner: live.filter(p => p.approval === 'pending_owner').length,
     flaggedCount: pays.filter(p => p.status === 'flagged').length,
   };
 }
 
-const withOrder = (p, orders) => { const o = orders.find(x => x.code === p.orderCode); return { ...p, customer: o ? o.customer : '' }; };
+const withOrder = (p, orders) => { const o = orders.find(x => x.code === p.orderCode); return { ...p, customer: o ? o.customer : '', validationNote: payNote(p) }; };
 
 function normDate(d) {
   d = String(d || '').trim();
@@ -102,10 +126,24 @@ function normDate(d) {
   return d;
 }
 
+const STORAGE = ['app', 'app_sheet', 'app_api', 'all'];
 async function getSettings() {
-  const s = await db.get('settings', 'main');
-  return s || { id: 'main', businessName: '', managerEmails: [], connectors: { api: { enabled: false, url: '', key: '' } } };
+  const s = (await db.get('settings', 'main')) || { id: 'main' };
+  return {
+    id: 'main', businessName: s.businessName || '', managerEmails: s.managerEmails || [],
+    connectors: { api: { enabled: false, url: '', key: '', ...((s.connectors && s.connectors.api) || {}) } },
+    storage: STORAGE.includes(s.storage) ? s.storage : 'app',
+    business: { name: '', taxId: '', taxNA: false, address: '', contact: '', gstRate: '', kind: '', industry: '', ...(s.business || {}) },
+    customerFields: Array.isArray(s.customerFields) ? s.customerFields : [],
+    limits: { singlePayment: 0, collectionThreshold: 0, ...(s.limits || {}) },
+    onboarded: !!s.onboarded, invoiceSampleId: s.invoiceSampleId || '', lastExportAt: s.lastExportAt || '', lastExportById: s.lastExportById || '',
+  };
 }
+async function saveSettings(next) { if (await db.get('settings', 'main')) await db.update('settings', 'main', next); else await db.insert('settings', next); }
+
+async function notify(to, text, orderCode) { try { await db.insert('notifications', { to, text: String(text).slice(0, 300), orderCode: orderCode || '', read: false }); } catch (e) { /* never block */ } }
+const mine = (n, me) => n.to === 'user:' + me.id || (n.to === 'role:owner' && me.role === 'owner') || (n.to === 'role:manager' && RANK[me.role] >= RANK.manager);
+const inr = n => '₹' + Number(n).toLocaleString('en-IN');
 
 async function runConnectors(event, payment, order, me) {
   try {
@@ -114,6 +152,99 @@ async function runConnectors(event, payment, order, me) {
     for (const r of results) await audit(me, 'connector_' + (r.ok ? 'ok' : 'failed'), 'payment', payment.id, `${r.connector} ${event} ${r.status || r.error || ''}`);
     return results;
   } catch (e) { return []; }
+}
+
+// ---------- payment entry (shared by new order and add payment) ----------
+async function addPayment(me, order, body, opts = {}) {
+  const settings = await getSettings();
+  const mode = lc(body.mode);
+  if (!MODES.includes(mode)) throw new HttpErr(400, 'Choose UPI, bank transfer or cash');
+  const amount = r2(body.amount);
+  if (!(amount > 0) || amount > 1e9) throw new HttpErr(400, 'Enter the amount');
+  const date = normDate(body.date);
+  if (!date) throw new HttpErr(400, 'Enter the payment date');
+  if (date === 'future') throw new HttpErr(400, 'That date is in the future');
+  const txnId = String(body.txnId || '').trim().slice(0, 40);
+  const isMgr = RANK[me.role] >= RANK.manager;
+  if (mode !== 'cash') {
+    if (!txnId) throw new HttpErr(400, 'No transaction ID found. Add a screenshot that shows the transaction ID, or type it in.', { needTxn: true });
+    if (!body.imageId && !isMgr) throw new HttpErr(400, 'Attach the payment screenshot');
+  }
+  if (body.imageId && !(await db.get('images', body.imageId))) throw new HttpErr(400, 'Screenshot not found, please attach it again');
+  const all = (await db.all('payments')).filter(p => p.status !== 'rejected');
+  if (txnId && mode !== 'cash') {
+    const d = all.find(p => p.txnId && lc(p.txnId) === lc(txnId));
+    if (d) throw new HttpErr(409, `This payment is already recorded (order ${d.orderCode}).`, { duplicate: true });
+  }
+  const mineP = all.filter(p => p.orderCode === order.code);
+  const expected = mineP.length + 1;
+  const seq = opts.first ? 1 : (Number(body.seq) > 0 ? Math.floor(Number(body.seq)) : expected);
+  let seqReason = '';
+  if (seq !== expected) {
+    seqReason = String(body.seqReason || '').trim().slice(0, 200);
+    if (seqReason.length < 3) throw new HttpErr(409, `This looks like payment ${expected} for this order, but you picked ${seq}. Write why, or pick ${expected}.`, { needReason: true, expected });
+  }
+  let status = mode === 'cash' ? 'cash_pending' : 'client_reported';
+  let reason = '', approval = '';
+  if (mode === 'cash') {
+    if (me.role === 'owner') status = 'cash_confirmed';
+    else approval = 'pending_owner';
+  } else if (isMgr && me.role !== 'owner') approval = 'pending_owner';
+  const lim = Number(settings.limits.singlePayment) || 0;
+  const notices = [];
+  if (lim > 0 && amount > lim && me.role !== 'owner') { approval = 'pending_owner'; notices.push(`This payment is above ${inr(lim)}. The owner will approve it.`); }
+  const already = r2(mineP.reduce((s, p) => s + p.amount, 0));
+  if (order.total && already + amount > order.total + 0.005) { status = 'flagged'; reason = 'overpayment'; notices.push('This is more than the order total. A manager will review it.'); }
+  const th = Number(settings.limits.collectionThreshold) || 0;
+  if (th > 0 && already + amount > th) notices.push('Please talk to your manager or owner first. This entry is saved and flagged for them.');
+  const p = await db.insert('payments', {
+    orderCode: order.code, mode, amount, date, txnId, seq, seqReason, payer: String(body.payer || '').trim().slice(0, 80), payee: String(body.payee || '').trim().slice(0, 80),
+    imageId: body.imageId || '', note: String(body.note || '').slice(0, 200), status, reason, approval,
+    createdBy: me.id, createdByName: me.name, ocr: body.ocr ? String(body.ocr).slice(0, 20) : '',
+    attention: notices.length > 0 && !notices[0].startsWith('This payment is above') ? true : !!(lim > 0 && amount > lim),
+  });
+  await audit(me, 'payment_added', 'payment', p.id, `${order.code} #${seq} ${mode} ${amount} ${status}${seqReason ? '. Out of order: ' + seqReason : ''}`);
+  if (approval === 'pending_owner') await notify('role:owner', `${me.name} entered ${inr(amount)} (${mode}) on ${order.code}. It needs your approval.`, order.code);
+  if (status === 'flagged') await notify('role:manager', `${order.code}: ${inr(amount)} is more than the order total. Please review.`, order.code);
+  if (th > 0 && already + amount > th) await notify('role:manager', `${order.code}: collections passed ${inr(th)} (${inr(already + amount)}). Entered by ${me.name}.`, order.code);
+  if (!opts.first) await runConnectors('created', p, order, me);
+  return { p, notice: notices.join(' '), notices };
+}
+
+async function afterApprove(me, o, settings) {
+  const exists = (await db.all('invoices')).find(i => i.orderCode === o.code);
+  if (!exists) await db.insert('invoices', { orderCode: o.code, no: 'INV-' + o.code, generatedBy: me.name });
+  await audit(me, 'invoice_generated', 'order', o.code, 'INV-' + o.code);
+  try { await dispatchOrder('order_approved', o, settings); } catch (e) { /* never block */ }
+  for (const p of (await db.all('payments')).filter(x => x.orderCode === o.code && x.status !== 'rejected')) await runConnectors('created', p, o, me);
+}
+
+async function applyAdjust(me, o, r, settings) {
+  const at = new Date().toISOString();
+  let n;
+  if (r.kind === 'close_offline') {
+    await db.insert('payments', { orderCode: o.code, mode: 'cash', amount: r.amount, date: at.slice(0, 16), txnId: '', seq: 0, status: 'cash_confirmed', approval: '', note: 'Received offline (adjustment): ' + r.comment, adjust: true, createdBy: r.byId || me.id, createdByName: r.by || me.name });
+    n = await db.update('orders', o.id, { status: 'closed', closedAt: at });
+    await audit(me, 'adjust_close_offline', 'order', o.code, `${r.amount} offline. ${r.comment}`);
+  } else {
+    n = await db.update('orders', o.id, { total: r.newTotal, modifications: [...(o.modifications || []), { field: 'total', from: o.total, to: r.newTotal, by: me.name, at, comment: r.comment }] });
+    await audit(me, 'adjust_total', 'order', o.code, `${o.total} -> ${r.newTotal}. ${r.comment}`);
+  }
+  if (r.byId && r.byId !== me.id) await notify('user:' + r.byId, `Your change to ${o.code} was approved.`, o.code);
+  return n;
+}
+
+function esc(x) { return String(x == null ? '' : x).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+function invoiceHtml(o, v, inv, settings, pays) {
+  const b = settings.business;
+  const rows = pays.filter(p => p.status !== 'rejected').map(p => `<tr><td>${esc(String(p.date || '').slice(0, 10))}</td><td>${esc(p.mode)}</td><td style="text-align:right">${esc(inr(p.amount))}</td></tr>`).join('');
+  const extra = settings.customerFields.map(f => `<div>${esc(f.label)}: ${esc((o.customerExtra || {})[f.key] || '')}</div>`).join('');
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(inv.no)}</title><style>body{font:15px system-ui,sans-serif;max-width:720px;margin:32px auto;padding:0 20px;color:#111}h1{font-size:22px;margin:0}table{width:100%;border-collapse:collapse;margin:14px 0}td,th{padding:8px;border-bottom:1px solid #ddd;text-align:left}.r{text-align:right}.big{font-size:18px;font-weight:700}@media print{.np{display:none}}</style></head><body>
+<div style="display:flex;justify-content:space-between"><div><h1>${esc(b.name || settings.businessName || 'Invoice')}</h1><div>${esc(b.address)}</div><div>${esc(b.contact)}</div><div>${b.taxNA ? '' : 'GST / Tax no: ' + esc(b.taxId)}</div></div><div style="text-align:right"><div class="big">Invoice ${esc(inv.no)}</div><div>${esc(String(inv.created || '').slice(0, 10))}</div></div></div>
+<hr><div><b>Bill to:</b> ${esc(o.customer)}</div>${extra}<div>Order: ${esc(o.code)}</div>
+<table><tr><th>Date</th><th>Mode</th><th class="r">Paid</th></tr>${rows}</table>
+<table><tr><td>Order total</td><td class="r big">${esc(inr(o.total))}</td></tr><tr><td>Paid so far</td><td class="r">${esc(inr(v.collected))}</td></tr><tr><td>Balance</td><td class="r big">${esc(inr(v.outstanding))}</td></tr></table>
+<p class="np"><button onclick="print()">Print or save as PDF</button></p></body></html>`;
 }
 
 // ---------- rate limit (best effort, per server instance) ----------
@@ -191,30 +322,42 @@ async function route(req, res) {
   }
 
   // ----- settings
-  if (a === 'settings') {
+  if (a === 'settings' && !b) {
     if (m === 'GET') {
-      const me = await authed(req, url, 'manager');
+      const me = await authed(req, url, 'uploader');
       const s = await getSettings();
-      const api = (s.connectors && s.connectors.api) || {};
-      return send(res, 200, { settings: { businessName: s.businessName || '', managerEmails: s.managerEmails || [], connectors: { api: { enabled: !!api.enabled, url: me.role === 'owner' ? api.url || '' : '', keySet: !!api.key } } } });
+      const api = s.connectors.api;
+      const base = { businessName: s.businessName, onboarded: s.onboarded, customerFields: s.customerFields, business: { name: s.business.name, taxNA: s.business.taxNA } };
+      if (RANK[me.role] < RANK.manager) return send(res, 200, { settings: base });
+      return send(res, 200, { settings: { ...base, managerEmails: s.managerEmails, storage: s.storage, business: s.business, limits: s.limits, lastExportAt: s.lastExportAt, connectors: { api: { enabled: !!api.enabled, url: me.role === 'owner' ? api.url || '' : '', keySet: !!api.key } } } });
     }
     if (m === 'PUT') {
       const me = await authed(req, url, 'owner');
       const body = await readBody(req);
       const cur = await getSettings();
-      const curApi = (cur.connectors && cur.connectors.api) || {};
+      const curApi = cur.connectors.api;
       const inApi = (body.connectors && body.connectors.api) || {};
       if (inApi.url) { const bad = validateUrl(inApi.url); if (bad) throw new HttpErr(400, bad); }
+      const bz = body.business || cur.business;
+      const biz = { name: String(bz.name || '').slice(0, 80), taxNA: !!bz.taxNA, taxId: String(bz.taxId || '').trim().slice(0, 30), address: String(bz.address || '').slice(0, 200), contact: String(bz.contact || '').slice(0, 120), gstRate: String(bz.gstRate || '').slice(0, 20), kind: String(bz.kind || '').slice(0, 40), industry: String(bz.industry || '').slice(0, 40) };
+      if (body.onboarded && !biz.taxNA && !biz.taxId) throw new HttpErr(400, 'Enter your GST or tax number, or tick that GST or tax is not applicable to your business');
+      const cf = (Array.isArray(body.customerFields) ? body.customerFields : cur.customerFields).slice(0, 6).map(f => ({ label: String(f.label || '').trim().slice(0, 30) })).filter(f => f.label).map((f, i) => ({ label: f.label, key: 'f' + i + '_' + f.label.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 12) }));
+      const lm = body.limits || cur.limits;
       const next = {
-        id: 'main',
-        businessName: String(body.businessName || '').slice(0, 80),
-        managerEmails: (Array.isArray(body.managerEmails) ? body.managerEmails : []).map(x => String(x).trim()).filter(x => /^\S+@\S+\.\S+$/.test(x)).slice(0, 5),
+        id: 'main', businessName: String(body.businessName !== undefined ? body.businessName : cur.businessName || biz.name).slice(0, 80),
+        managerEmails: (Array.isArray(body.managerEmails) ? body.managerEmails : cur.managerEmails).map(x => String(x).trim()).filter(x => /^\S+@\S+\.\S+$/.test(x)).slice(0, 5),
         connectors: { api: { enabled: !!inApi.enabled, url: inApi.url !== undefined ? String(inApi.url).trim() : curApi.url || '', key: inApi.key ? String(inApi.key) : curApi.key || '' } },
+        storage: STORAGE.includes(body.storage) ? body.storage : cur.storage,
+        business: biz, customerFields: cf,
+        limits: { singlePayment: Math.max(0, r2(lm.singlePayment) || 0), collectionThreshold: Math.max(0, r2(lm.collectionThreshold) || 0) },
+        onboarded: body.onboarded !== undefined ? !!body.onboarded : cur.onboarded, invoiceSampleId: body.invoiceSampleId !== undefined ? String(body.invoiceSampleId).slice(0, 40) : cur.invoiceSampleId, lastExportAt: cur.lastExportAt, lastExportById: cur.lastExportById,
       };
-      if (await db.get('settings', 'main')) await db.update('settings', 'main', next); else await db.insert('settings', next);
-      await audit(me, 'settings_updated', 'settings', 'main', 'API connector ' + (next.connectors.api.enabled ? 'on' : 'off'));
+      await saveSettings(next);
+      await audit(me, 'settings_updated', 'settings', 'main', `storage ${next.storage}; limits ${next.limits.singlePayment}/${next.limits.collectionThreshold}`);
       return send(res, 200, { ok: true });
     }
+  }
+  if (a === 'settings') {
     if (b === 'test-api' && m === 'POST') {
       const me = await authed(req, url, 'owner');
       const s = await getSettings();
@@ -274,14 +417,31 @@ async function route(req, res) {
       await authed(req, url, 'uploader');
       const o = (await db.all('orders')).find(x => lc(x.code) === lc(c));
       if (!o) throw new HttpErr(404, 'No order with that ID');
-      return send(res, 200, { code: o.code, customer: o.customer, closed: o.status === 'closed', pending: o.status === 'pending', rejected: o.status === 'rejected' });
+      const n = (await db.all('payments')).filter(p => p.orderCode === o.code && p.status !== 'rejected').length;
+      return send(res, 200, { code: o.code, customer: o.customer, total: o.total, closed: o.status === 'closed', pending: o.status === 'pending', rejected: o.status === 'rejected', nextPayment: n + 1 });
     }
-    const me = await authed(req, url, !b && m === 'POST' ? 'uploader' : 'manager');
+    if (b === 'mine' && m === 'GET') {
+      const me = await authed(req, url, 'uploader');
+      const list = (await db.all('orders')).filter(o => o.createdById === me.id).reverse();
+      return send(res, 200, { orders: list.map(o => ({ code: o.code, customer: o.customer, total: o.total, status: o.status, rejectReason: o.rejectReason || '', customerExtra: o.customerExtra || {}, modifications: o.modifications || [] })) });
+    }
+    const resubmitting = c === 'resubmit' && m === 'POST';
+    const me = await authed(req, url, (!b && m === 'POST') || resubmitting ? 'uploader' : 'manager');
     const orders = await db.all('orders');
+    const settings = await getSettings();
     if (!b && m === 'GET') {
       const pays = await db.all('payments');
       return send(res, 200, { orders: orders.map(o => orderView(o, pays)).reverse() });
     }
+    const readExtra = (inp, old) => {
+      const out = { ...(old || {}) };
+      for (const f of settings.customerFields) {
+        const v = inp && inp[f.key] !== undefined ? String(inp[f.key]).trim().slice(0, 120) : (out[f.key] || '');
+        if (!v) throw new HttpErr(400, `Enter ${f.label.toLowerCase()}`);
+        out[f.key] = v;
+      }
+      return out;
+    };
     if (!b && m === 'POST') {
       const body = await readBody(req);
       const total = r2(body.total);
@@ -290,32 +450,45 @@ async function route(req, res) {
       let code = String(body.code || '').trim();
       if (!code) { const n = orders.map(o => /^ORD-(\d+)$/.exec(o.code)).filter(Boolean).map(x => +x[1]); code = 'ORD-' + ((n.length ? Math.max(...n) : 1000) + 1); }
       if (!/^[A-Za-z0-9._-]{2,24}$/.test(code)) throw new HttpErr(400, 'Order ID can use letters, numbers, dot, dash and underscore');
-      if (orders.some(o => lc(o.code) === lc(code))) throw new HttpErr(409, 'That order ID already exists');
-      const o = await db.insert('orders', { code, customer: String(body.customer).trim().slice(0, 80), total, status: RANK[me.role] >= RANK.manager ? 'open' : 'pending', note: String(body.note || '').slice(0, 200), createdBy: me.name, createdById: me.id });
-      await audit(me, 'order_created', 'order', o.code, `${o.customer}, total ${o.total}${o.status === 'pending' ? ', waiting for manager approval' : ''}`);
-      if (o.status === 'open') for (const r of await dispatchOrder('order_created', o)) await audit(me, 'connector_' + (r.ok ? 'ok' : 'failed'), 'order', o.code, `${r.connector} order_created ${r.status || r.error || ''}`);
-      return send(res, 200, { order: RANK[me.role] >= RANK.manager ? orderView(o, []) : { code: o.code, customer: o.customer } });
+      if (orders.some(o => lc(o.code) === lc(code))) throw new HttpErr(409, 'That order ID already exists. To add a payment to it, use Add payment.');
+      const customerExtra = readExtra(body.customerExtra, {});
+      const isMgr = RANK[me.role] >= RANK.manager;
+      if (!body.firstPayment && !isMgr) throw new HttpErr(400, 'Add the first advance payment screenshot with the order');
+      let first = null;
+      if (body.firstPayment) first = await addPayment(me, { code, status: 'pending' }, { ...body.firstPayment, seq: 1 }, { first: true });
+      const o = await db.insert('orders', { code, customer: String(body.customer).trim().slice(0, 80), total, status: isMgr ? 'open' : 'pending', note: String(body.note || '').slice(0, 200), createdBy: me.name, createdById: me.id, customerExtra });
+      await audit(me, 'order_created', 'order', o.code, `${o.customer}, total ${o.total}${o.status === 'pending' ? ', waiting for approval' : ''}`);
+      if (o.status === 'open') await afterApprove(me, o, settings);
+      else await notify('role:manager', `New order ${o.code} (${o.customer}, ${inr(o.total)}) is waiting for approval.`, o.code);
+      return send(res, 200, { order: isMgr ? orderView(o, first ? [first.p] : []) : { code: o.code, customer: o.customer, status: 'pending' }, notice: first && first.notice });
     }
     const o = orders.find(x => lc(x.code) === lc(b));
     if (!o) throw new HttpErr(404, 'Order not found');
     const pays = await db.all('payments');
     if (!c && m === 'GET') {
-      const mine = pays.filter(p => p.orderCode === o.code);
-      return send(res, 200, { order: orderView(o, pays), payments: mine.reverse() });
+      const mineP = pays.filter(p => p.orderCode === o.code);
+      return send(res, 200, { order: orderView(o, pays), payments: mineP.reverse().map(p => ({ ...p, validationNote: payNote(p) })), invoice: !!(await db.all('invoices')).find(i => i.orderCode === o.code) });
+    }
+    if (resubmitting) {
+      if (o.status !== 'rejected') throw new HttpErr(400, 'Only a rejected order can be sent again');
+      if (o.createdById !== me.id && RANK[me.role] < RANK.manager) throw new HttpErr(403, 'This is not your order');
+      const body = await readBody(req);
+      const patch = { status: 'pending', rejectReason: '' };
+      if (body.customer !== undefined) { if (!String(body.customer).trim()) throw new HttpErr(400, 'Enter the client name'); patch.customer = String(body.customer).trim().slice(0, 80); }
+      if (body.total !== undefined) { const t = r2(body.total); if (!(t > 0)) throw new HttpErr(400, 'Enter a valid total'); patch.total = t; }
+      patch.customerExtra = readExtra(body.customerExtra, o.customerExtra);
+      const n = await db.update('orders', o.id, patch);
+      await audit(me, 'order_resubmitted', 'order', o.code, '');
+      await notify('role:manager', `Order ${o.code} was corrected and sent again for approval.`, o.code);
+      return send(res, 200, { order: { code: n.code, status: n.status } });
     }
     if (!c && m === 'PATCH') {
       const body = await readBody(req);
+      if (me.role !== 'owner' && o.status !== 'pending') throw new HttpErr(403, 'This order is locked after approval. Use Adjust: a manager’s change goes to the owner.');
       const patch = {};
       if (body.customer !== undefined) patch.customer = String(body.customer).trim().slice(0, 80);
       if (body.note !== undefined) patch.note = String(body.note).slice(0, 200);
-      if (body.total !== undefined) {
-        const t = r2(body.total);
-        if (!(t > 0)) throw new HttpErr(400, 'Enter a valid total');
-        if (t !== o.total) {
-          if (pays.some(p => p.orderCode === o.code && p.status !== 'rejected') && me.role !== 'owner') throw new HttpErr(403, 'Only the owner can change the total once payments exist');
-          patch.total = t;
-        }
-      }
+      if (body.total !== undefined) { const t = r2(body.total); if (!(t > 0)) throw new HttpErr(400, 'Enter a valid total'); if (t !== o.total) patch.total = t; }
       const n = await db.update('orders', o.id, patch);
       await audit(me, 'order_updated', 'order', o.code, Object.entries(patch).map(([k, v]) => `${k}: ${o[k]} -> ${v}`).join('; '));
       return send(res, 200, { order: orderView(n, pays) });
@@ -326,7 +499,7 @@ async function route(req, res) {
       const blockers = [];
       if (v.outstandingVerified > 0) blockers.push(`₹${v.outstandingVerified} is not yet verified`);
       if (v.flaggedCount) blockers.push(`${v.flaggedCount} flagged payment(s) need review`);
-      if (v.pendingCash) blockers.push(`${v.pendingCash} cash entr${v.pendingCash > 1 ? 'ies' : 'y'} to confirm`);
+      if (v.pendingCash) blockers.push(`${v.pendingCash} cash entr${v.pendingCash > 1 ? 'ies' : 'y'} to approve`);
       if (blockers.length) {
         if (!(body.override && me.role === 'owner' && String(body.reason || '').trim().length >= 5)) throw new HttpErr(409, 'Cannot close: ' + blockers.join('; '), { blockers, canOverride: me.role === 'owner' });
         await audit(me, 'order_closed_override', 'order', o.code, 'Reason: ' + body.reason + '. ' + blockers.join('; '));
@@ -334,14 +507,57 @@ async function route(req, res) {
       const n = await db.update('orders', o.id, { status: 'closed', closedAt: new Date().toISOString() });
       return send(res, 200, { order: orderView(n, pays) });
     }
-    if ((c === 'approve' || c === 'reject') && m === 'POST') {
+    if (c === 'approve' && m === 'POST') {
       if (o.status !== 'pending') throw new HttpErr(400, 'This order is not waiting for approval');
       const body = await readBody(req);
-      if (c === 'reject' && !String(body.reason || '').trim()) throw new HttpErr(400, 'Give a reason for rejecting');
-      const n = await db.update('orders', o.id, c === 'approve' ? { status: 'open', approvedBy: me.name, approvedAt: new Date().toISOString() } : { status: 'rejected', rejectedBy: me.name, rejectReason: String(body.reason).slice(0, 200) });
-      await audit(me, c === 'approve' ? 'order_approved' : 'order_rejected', 'order', o.code, c === 'approve' ? `total ${o.total}` : String(body.reason).slice(0, 200));
-      if (c === 'approve') for (const r of await dispatchOrder('order_approved', n)) await audit(me, 'connector_' + (r.ok ? 'ok' : 'failed'), 'order', o.code, `${r.connector} order_approved ${r.status || r.error || ''}`);
+      const mods = [], at = new Date().toISOString();
+      const patch = { status: 'open', approvedBy: me.name, approvedAt: at };
+      if (body.customer !== undefined && String(body.customer).trim() && String(body.customer).trim() !== o.customer) { patch.customer = String(body.customer).trim().slice(0, 80); mods.push({ field: 'client name', from: o.customer, to: patch.customer }); }
+      if (body.total !== undefined && r2(body.total) !== o.total) { const t = r2(body.total); if (!(t > 0)) throw new HttpErr(400, 'Enter a valid total'); patch.total = t; mods.push({ field: 'total', from: o.total, to: t }); }
+      if (body.customerExtra) { const ex = { ...(o.customerExtra || {}) }; for (const f of settings.customerFields) { const v = body.customerExtra[f.key]; if (v !== undefined && String(v).trim() && String(v).trim() !== ex[f.key]) { mods.push({ field: f.label.toLowerCase(), from: ex[f.key] || '', to: String(v).trim() }); ex[f.key] = String(v).trim().slice(0, 120); } } patch.customerExtra = ex; }
+      if (mods.length) patch.modifications = [...(o.modifications || []), ...mods.map(x => ({ ...x, by: me.name, at, comment: String(body.comment || '').slice(0, 200) }))];
+      const n = await db.update('orders', o.id, patch);
+      await audit(me, mods.length ? 'order_modified_approved' : 'order_approved', 'order', o.code, mods.map(x => `${x.field}: ${x.from} -> ${x.to}`).join('; ') || `total ${n.total}`);
+      if (o.createdById) await notify('user:' + o.createdById, mods.length ? `${o.code} was modified: ${mods.map(x => `${x.field} from ${x.from} to ${x.to}`).join(', ')}. It is approved now.` : `${o.code} was approved.`, o.code);
+      await afterApprove(me, n, settings);
       return send(res, 200, { order: orderView(n, pays) });
+    }
+    if (c === 'reject' && m === 'POST') {
+      if (o.status !== 'pending') throw new HttpErr(400, 'This order is not waiting for approval');
+      const body = await readBody(req);
+      if (!String(body.reason || '').trim()) throw new HttpErr(400, 'Give a reason for rejecting');
+      const n = await db.update('orders', o.id, { status: 'rejected', rejectedBy: me.name, rejectReason: String(body.reason).slice(0, 200) });
+      await audit(me, 'order_rejected', 'order', o.code, String(body.reason).slice(0, 200));
+      if (o.createdById) await notify('user:' + o.createdById, `${o.code} was sent back: ${String(body.reason).slice(0, 120)}. Please fix it and send it again.`, o.code);
+      return send(res, 200, { order: orderView(n, pays) });
+    }
+    if (c === 'adjust' && m === 'POST') {
+      if (o.status !== 'open') throw new HttpErr(400, 'Only an open order can be adjusted');
+      const body = await readBody(req);
+      const v = orderView(o, pays);
+      const kind = body.kind;
+      const comment = String(body.comment || '').trim();
+      if (comment.length < 3) throw new HttpErr(400, 'Add a comment explaining the change');
+      const reqd = { orderCode: o.code, kind, comment: comment.slice(0, 200), by: me.name, byId: me.id, status: 'pending' };
+      if (kind === 'close_offline') {
+        if (!(v.outstanding > 0)) throw new HttpErr(400, 'Nothing is outstanding on this order');
+        if (r2(body.amount) !== v.outstanding) throw new HttpErr(400, `The offline amount must equal the outstanding amount (${inr(v.outstanding)})`);
+        reqd.amount = v.outstanding;
+      } else if (kind === 'change_total') {
+        const t = r2(body.newTotal);
+        if (!(t > 0)) throw new HttpErr(400, 'Enter the new total');
+        if (t < v.collected) throw new HttpErr(400, `The new total cannot be below what is collected (${inr(v.collected)})`);
+        if (t === o.total) throw new HttpErr(400, 'That is the same total');
+        reqd.newTotal = t; reqd.oldTotal = o.total;
+      } else throw new HttpErr(400, 'Choose close with an offline amount, or change the total');
+      if (me.role === 'owner') {
+        const n = await applyAdjust(me, o, reqd, settings);
+        return send(res, 200, { applied: true, order: orderView(n, await db.all('payments')) });
+      }
+      const r = await db.insert('requests', reqd);
+      await audit(me, 'adjust_requested', 'order', o.code, `${kind} ${reqd.amount || reqd.newTotal}. ${comment}`);
+      await notify('role:owner', `${me.name} asks to ${kind === 'close_offline' ? `close ${o.code} with ${inr(reqd.amount)} received offline` : `change ${o.code} total from ${inr(o.total)} to ${inr(reqd.newTotal)}`}: "${comment.slice(0, 100)}"`, o.code);
+      return send(res, 200, { requested: true, id: r.id });
     }
     if (c === 'reopen' && m === 'POST') {
       const n = await db.update('orders', o.id, { status: 'open' });
@@ -354,53 +570,27 @@ async function route(req, res) {
   if (a === 'payments') {
     if (b === 'mine' && m === 'GET') {
       const me = await authed(req, url, 'uploader');
-      const mine = (await db.all('payments')).filter(p => p.createdBy === me.id).reverse();
-      return send(res, 200, { payments: mine.map(p => ({ id: p.id, orderCode: p.orderCode, amount: p.amount, mode: p.mode, date: p.date, created: p.created })) });
+      const mineP = (await db.all('payments')).filter(p => p.createdBy === me.id).reverse();
+      return send(res, 200, { payments: mineP.map(p => ({ id: p.id, orderCode: p.orderCode, amount: p.amount, mode: p.mode, date: p.date, created: p.created, seq: p.seq })) });
     }
     if (!b && m === 'POST') {
       const me = await authed(req, url, 'uploader');
       const body = await readBody(req);
-      const orders = await db.all('orders');
-      const order = orders.find(o => lc(o.code) === lc(body.orderCode));
+      const order = (await db.all('orders')).find(o => lc(o.code) === lc(body.orderCode));
       if (!order) throw new HttpErr(400, 'No order with that ID. Check the order ID.');
       if (order.status === 'closed') throw new HttpErr(400, 'That order is closed.');
       if (order.status === 'pending') throw new HttpErr(400, 'That order is waiting for manager approval.');
-      if (order.status === 'rejected') throw new HttpErr(400, 'That order was rejected by a manager.');
-      const mode = lc(body.mode);
-      if (!MODES.includes(mode)) throw new HttpErr(400, 'Choose UPI, bank transfer or cash');
-      const amount = r2(body.amount);
-      if (!(amount > 0) || amount > 1e9) throw new HttpErr(400, 'Enter the amount');
-      const date = normDate(body.date);
-      if (!date) throw new HttpErr(400, 'Enter the payment date');
-      if (date === 'future') throw new HttpErr(400, 'That date is in the future');
-      if (mode !== 'cash' && !body.imageId && me.role === 'uploader') throw new HttpErr(400, 'Attach the payment screenshot');
-      if (body.imageId && !(await db.get('images', body.imageId))) throw new HttpErr(400, 'Screenshot not found, please attach it again');
-      const txnId = String(body.txnId || '').trim().slice(0, 40);
-      const payee = String(body.payee || '').trim().slice(0, 80);
-      const all = (await db.all('payments')).filter(p => p.status !== 'rejected');
-      if (txnId && mode !== 'cash') {
-        const d = all.find(p => p.txnId && lc(p.txnId) === lc(txnId));
-        if (d) throw new HttpErr(409, `This payment is already recorded (order ${d.orderCode}).`, { duplicate: true });
-      }
-      let status = mode === 'cash' ? 'cash_pending' : 'client_reported';
-      let reason = '';
-      const dup = !txnId && mode !== 'cash' && all.find(p => p.mode === mode && p.amount === amount && (p.date === date || (p.orderCode === order.code && p.date.slice(0, 10) === date.slice(0, 10))));
-      if (dup) { status = 'flagged'; reason = 'possible_duplicate'; }
-      const p = await db.insert('payments', {
-        orderCode: order.code, mode, amount, date, txnId, payer: String(body.payer || '').trim().slice(0, 80), payee,
-        imageId: body.imageId || '', note: String(body.note || '').slice(0, 200), status, reason,
-        createdBy: me.id, createdByName: me.name, ocr: body.ocr ? String(body.ocr).slice(0, 20) : '',
-      });
-      await audit(me, 'payment_added', 'payment', p.id, `${order.code} ${mode} ${amount} ${status}`);
-      const cn = await runConnectors('created', p, order, me);
-      return send(res, 200, { payment: { id: p.id, orderCode: p.orderCode, amount: p.amount, mode: p.mode, flagged: status === 'flagged' }, connectors: cn });
+      if (order.status === 'rejected') throw new HttpErr(400, 'That order was sent back. Fix it and send it again first.');
+      const { p, notice } = await addPayment(me, order, body);
+      return send(res, 200, { payment: { id: p.id, orderCode: p.orderCode, amount: p.amount, mode: p.mode, seq: p.seq, flagged: p.status === 'flagged', needsOwner: p.approval === 'pending_owner' }, notice });
     }
     const me = await authed(req, url, 'manager');
     const orders = await db.all('orders');
     if (!b && m === 'GET') {
       let list = await db.all('payments');
       const st = url.searchParams.get('status'), oc = url.searchParams.get('order'), mo = url.searchParams.get('month');
-      if (st) list = list.filter(p => p.status === st);
+      if (st === 'owner') list = list.filter(p => p.approval === 'pending_owner' && p.status !== 'rejected');
+      else if (st) list = list.filter(p => p.status === st);
       if (oc) list = list.filter(p => lc(p.orderCode) === lc(oc));
       if (mo) list = list.filter(p => (p.date || '').startsWith(mo));
       return send(res, 200, { payments: list.reverse().map(p => withOrder(p, orders)) });
@@ -408,17 +598,19 @@ async function route(req, res) {
     const p = await db.get('payments', b);
     if (!p) throw new HttpErr(404, 'Payment not found');
     const order = orders.find(o => o.code === p.orderCode);
-    const body = ['confirm-cash', 'verify', 'release', 'reject', 'flag'].includes(c) ? await readBody(req) : {};
+    const body = ['confirm-cash', 'approve', 'verify', 'release', 'reject', 'flag'].includes(c) ? await readBody(req) : {};
     const done = async (patch, action, detail, event) => {
       const n = await db.update('payments', p.id, patch);
       await audit(me, action, 'payment', p.id, `${p.orderCode} ${p.amount}. ${detail || ''}`);
       await runConnectors(event || action, n, order || { code: p.orderCode }, me);
+      if (p.createdBy && p.createdBy !== me.id && ['payment_rejected', 'owner_approved'].includes(action)) await notify('user:' + p.createdBy, `${p.orderCode}: your ${inr(p.amount)} entry was ${action === 'owner_approved' ? 'approved' : 'rejected: ' + String(detail || '').slice(0, 80)}.`, p.orderCode);
       return send(res, 200, { payment: n });
     };
-    if (c === 'confirm-cash' && m === 'POST') {
-      if (p.status !== 'cash_pending') throw new HttpErr(409, 'This cash entry is not waiting for confirmation');
-      if (p.createdBy === me.id) throw new HttpErr(403, 'You logged this entry, so someone else must confirm it');
-      return done({ status: 'cash_confirmed', confirmedBy: me.name, confirmedById: me.id, confirmedAt: new Date().toISOString(), confirmNote: String(body.note || '').slice(0, 200) }, 'cash_confirmed', body.note, 'cash_confirmed');
+    if ((c === 'confirm-cash' || c === 'approve') && m === 'POST') {
+      if (me.role !== 'owner') throw new HttpErr(403, 'Only the owner can approve this');
+      if (p.status === 'cash_pending') return done({ status: 'cash_confirmed', approval: '', confirmedBy: me.name, confirmedById: me.id, confirmedAt: new Date().toISOString(), confirmNote: String(body.note || '').slice(0, 200) }, 'owner_approved', 'cash ' + (body.note || ''), 'cash_confirmed');
+      if (p.approval === 'pending_owner') return done({ approval: '', approvedBy: me.name }, 'owner_approved', body.note, 'owner_approved');
+      throw new HttpErr(409, 'Nothing to approve on this entry');
     }
     if (c === 'verify' && m === 'POST') {
       if (p.status !== 'client_reported') throw new HttpErr(409, 'This payment is not waiting for verification');
@@ -428,7 +620,7 @@ async function route(req, res) {
     }
     if (c === 'release' && m === 'POST') {
       if (p.status !== 'flagged') throw new HttpErr(409, 'This payment is not flagged');
-      const back = p.mode === 'cash' ? 'cash_pending' : 'client_reported';
+      const back = p.mode === 'cash' ? (p.approval === 'pending_owner' || me.role !== 'owner' ? 'cash_pending' : 'cash_confirmed') : 'client_reported';
       return done({ status: back, reason: '' }, 'flag_released', body.note, 'released');
     }
     if (c === 'reject' && m === 'POST') {
@@ -439,6 +631,91 @@ async function route(req, res) {
       if (String(body.reason || '').trim().length < 3) throw new HttpErr(400, 'Give a reason');
       return done({ status: 'flagged', reason: String(body.reason).slice(0, 80) }, 'payment_flagged', body.reason, 'flagged');
     }
+  }
+
+  // ----- notifications
+  if (a === 'notifications') {
+    const me = await authed(req, url, 'uploader');
+    if (!b && m === 'GET') {
+      const list = (await db.all('notifications')).filter(n => mine(n, me)).reverse().slice(0, 50);
+      const isRead = n => (n.readBy || []).includes(me.id);
+      return send(res, 200, { notifications: list.map(n => ({ id: n.id, text: n.text, orderCode: n.orderCode, created: n.created, read: isRead(n) })), unread: list.filter(n => !isRead(n)).length });
+    }
+    if (b === 'read' && m === 'POST') {
+      for (const n of (await db.all('notifications')).filter(x => mine(x, me) && !(x.readBy || []).includes(me.id))) await db.update('notifications', n.id, { readBy: [...(n.readBy || []), me.id] });
+      return send(res, 200, { ok: true });
+    }
+  }
+
+  // ----- adjustment requests (owner decides)
+  if (a === 'requests') {
+    const me = await authed(req, url, 'manager');
+    if (!b && m === 'GET') return send(res, 200, { requests: (await db.all('requests')).filter(r => r.status === 'pending').reverse() });
+    const r = await db.get('requests', b);
+    if (!r || r.status !== 'pending') throw new HttpErr(404, 'Request not found');
+    if (me.role !== 'owner') throw new HttpErr(403, 'Only the owner can decide this');
+    const o = (await db.all('orders')).find(x => x.code === r.orderCode);
+    if (c === 'approve' && m === 'POST') {
+      if (!o || o.status !== 'open') throw new HttpErr(400, 'That order is no longer open');
+      await applyAdjust(me, o, r, await getSettings());
+      await db.update('requests', r.id, { status: 'approved', decidedBy: me.name });
+      return send(res, 200, { ok: true });
+    }
+    if (c === 'reject' && m === 'POST') {
+      await db.update('requests', r.id, { status: 'rejected', decidedBy: me.name });
+      await audit(me, 'adjust_rejected', 'order', r.orderCode, r.comment);
+      if (r.byId) await notify('user:' + r.byId, `Your change to ${r.orderCode} was not approved.`, r.orderCode);
+      return send(res, 200, { ok: true });
+    }
+  }
+
+  // ----- invoices
+  if (a === 'invoices' && b && m === 'GET') {
+    await authed(req, url, 'uploader');
+    const o = (await db.all('orders')).find(x => lc(x.code) === lc(b));
+    const inv = (await db.all('invoices')).find(i => o && i.orderCode === o.code);
+    if (!o || !inv) throw new HttpErr(404, 'No invoice for this order yet');
+    const pays = (await db.all('payments')).filter(p => p.orderCode === o.code);
+    res.statusCode = 200; res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    return res.end(invoiceHtml(o, orderView(o, pays), inv, await getSettings(), pays));
+  }
+
+  // ----- reports (owner)
+  if (a === 'reports' && m === 'GET') {
+    const me = await authed(req, url, 'owner');
+    const rawP = url.searchParams.get('period') || 'all';
+    const per = /^\d{4}(-\d{2})?$/.test(rawP) || rawP === 'all' ? rawP : 'all';
+    const pays = await db.all('payments');
+    const rows = (await db.all('orders')).filter(o => o.status !== 'pending' && o.status !== 'rejected' && (per === 'all' || (o.created || '').startsWith(per))).map(o => orderView(o, pays));
+    const t = f => r2(rows.reduce((s, o) => s + f(o), 0));
+    const out = { period: per, orders: rows.length, revenue: t(o => o.total), collected: t(o => o.collected), outstanding: t(o => o.outstanding), validated: t(o => o.validated), manual: t(o => o.manual), notValidated: t(o => o.notValidated) };
+    if (url.searchParams.get('csv') === '1') {
+      const q = x => '"' + String(x == null ? '' : x).replace(/"/g, '""').replace(/^([=+\-@])/, "'$1") + '"';
+      const head = ['Order', 'Client', 'Status', 'Total', 'Collected', 'Outstanding', 'Validated', 'Manually validated', 'Not validated'];
+      const lines = [head.map(q).join(',')].concat(rows.map(o => [o.code, o.customer, o.status, o.total, o.collected, o.outstanding, o.validated, o.manual, o.notValidated].map(q).join(',')));
+      await db.update('settings', 'main', { lastExportAt: new Date().toISOString(), lastExportById: me.id }).catch(() => {});
+      if (!(await db.get('settings', 'main'))) await db.insert('settings', { id: 'main', lastExportAt: new Date().toISOString(), lastExportById: me.id });
+      await audit(me, 'report_downloaded', 'report', per, `${rows.length} orders`);
+      res.statusCode = 200; res.setHeader('Content-Type', 'text/csv; charset=utf-8'); res.setHeader('Content-Disposition', `attachment; filename="report-${per}.csv"`);
+      return res.end(lines.join('\n'));
+    }
+    return send(res, 200, { report: out, orders: rows });
+  }
+
+  // ----- clear data (owner): closed orders' invoice files and screenshots only
+  if (a === 'data' && b === 'clear' && m === 'POST') {
+    const me = await authed(req, url, 'owner');
+    const body = await readBody(req);
+    const st = await getSettings();
+    const fresh = st.lastExportAt && Date.now() - Date.parse(st.lastExportAt) < 30 * 60 * 1000;
+    if (!fresh) throw new HttpErr(409, 'Download the report first. Then you can clear.', { needDownload: true });
+    if (body.confirm !== true) throw new HttpErr(409, 'This cannot be undone. Confirm to clear invoice files and screenshots of closed orders. Order records and totals stay.', { needConfirm: true });
+    const closed = new Set((await db.all('orders')).filter(o => o.status === 'closed').map(o => o.code));
+    let inv = 0, img = 0;
+    for (const i of await db.all('invoices')) if (closed.has(i.orderCode)) { await db.remove('invoices', i.id); inv++; }
+    for (const p of await db.all('payments')) if (closed.has(p.orderCode) && p.imageId) { await db.remove('images', p.imageId); await db.update('payments', p.id, { imageId: '', imageCleared: true }); img++; }
+    await audit(me, 'data_cleared', 'data', 'closed', `${inv} invoice files, ${img} screenshots`);
+    return send(res, 200, { invoices: inv, screenshots: img });
   }
 
   // ----- summary
@@ -466,6 +743,9 @@ async function route(req, res) {
       receivedOnline: r2(cnt.filter(p => p.mode !== 'cash').reduce((s, p) => s + p.amount, 0)),
       byStatus: { verified: sum(p => VERIFIED.includes(p.status)), awaiting: sum(p => UNVERIFIED.includes(p.status)), flagged: sum(p => p.status === 'flagged') },
       flaggedCount: live.filter(p => p.status === 'flagged').length,
+      ownerPending: live.filter(p => p.approval === 'pending_owner' || p.status === 'cash_pending').length,
+      adjustRequests: (await db.all('requests')).filter(r => r.status === 'pending').length,
+      validatedTotal: r2(views.reduce((x, o) => x + o.validated, 0)), manualTotal: r2(views.reduce((x, o) => x + o.manual, 0)), notValidatedTotal: r2(views.reduce((x, o) => x + o.notValidated, 0)),
       cashPendingCount: live.filter(p => p.status === 'cash_pending').length,
       cashPendingAmount: r2(live.filter(p => p.status === 'cash_pending').reduce((s, p) => s + p.amount, 0)),
       top: open.filter(o => o.outstanding > 0).sort((x, y) => y.outstanding - x.outstanding).slice(0, 8),
@@ -482,7 +762,7 @@ async function route(req, res) {
     const dates = rows.map(r => r.date).sort();
     const from = dates[0], to = dates[dates.length - 1];
     const day = d => Math.floor(Date.parse(d.slice(0, 10) + 'T00:00:00Z') / 86400000);
-    const pays = (await db.all('payments')).filter(p => p.mode !== 'cash' && (p.status === 'client_reported' || (p.status === 'flagged' && p.reason === 'no_matching_credit')));
+    const pays = (await db.all('payments')).filter(p => p.mode !== 'cash' && p.status === 'client_reported');
     const used = new Set();
     const allOrders = await db.all('orders');
     const matched = [], flagged = [];
@@ -493,13 +773,13 @@ async function route(req, res) {
     for (const p of sorted) { if (p._m) continue; const i = findRow(p, false); if (i >= 0) { used.add(i); p._m = { i, how: 'amount and date' }; } }
     for (const p of sorted) {
       if (p._m) {
-        await db.update('payments', p.id, { status: 'verified', reason: '', verifyMethod: 'statement', verifiedBy: me.name, verifiedAt: new Date().toISOString(), verifyNote: 'Matched on ' + p._m.how + ' with statement credit dated ' + rows[p._m.i].date });
+        await db.update('payments', p.id, { status: 'verified', reason: '', verifyMethod: 'statement', stmtUnableAt: '', verifiedBy: me.name, verifiedAt: new Date().toISOString(), verifyNote: 'Matched on ' + p._m.how + ' with statement credit dated ' + rows[p._m.i].date });
         await audit(me, 'payment_verified_statement', 'payment', p.id, `${p.orderCode} ${p.amount} matched on ${p._m.how}`);
         matched.push({ id: p.id, orderCode: p.orderCode, amount: p.amount, how: p._m.how });
         await runConnectors('verified', { ...p, status: 'verified' }, allOrders.find(o => o.code === p.orderCode) || { code: p.orderCode }, me);
       } else if (p.status === 'client_reported') {
-        await db.update('payments', p.id, { status: 'flagged', reason: 'no_matching_credit' });
-        await audit(me, 'payment_flagged_statement', 'payment', p.id, `${p.orderCode} ${p.amount} no matching credit between ${from} and ${to}`);
+        await db.update('payments', p.id, { stmtUnableAt: new Date().toISOString() });
+        await audit(me, 'payment_unable_to_validate', 'payment', p.id, `${p.orderCode} ${p.amount} not found in statement ${from} to ${to}`);
         flagged.push({ id: p.id, orderCode: p.orderCode, amount: p.amount });
       }
     }

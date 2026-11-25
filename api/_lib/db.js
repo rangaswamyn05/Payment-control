@@ -6,7 +6,7 @@ const crypto = require('crypto');
 const SB_URL = process.env.SUPABASE_URL;
 const SB_KEY = process.env.SUPABASE_SERVICE_KEY;
 const useSB = !!(SB_URL && SB_KEY);
-const TABLES = ['users', 'orders', 'payments', 'audit', 'settings', 'images'];
+const TABLES = ['users', 'orders', 'payments', 'audit', 'settings', 'images', 'notifications', 'requests', 'invoices'];
 
 const mem = global.__pcmem || (global.__pcmem = Object.fromEntries(TABLES.map(t => [t, []])));
 
@@ -55,4 +55,9 @@ async function update(t, id, patch) {
   return next;
 }
 
-module.exports = { all, get, insert, update, newId, kind: useSB ? 'supabase' : 'memory', TABLES };
+async function remove(t, id) {
+  if (!useSB) { const i = mem[t].findIndex(r => r.id === id); if (i >= 0) mem[t].splice(i, 1); return; }
+  await sb(`${t}?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE', headers: { Prefer: 'return=minimal' } });
+}
+
+module.exports = { all, get, insert, update, remove, newId, kind: useSB ? 'supabase' : 'memory', TABLES };

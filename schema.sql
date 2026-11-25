@@ -13,3 +13,12 @@ alter table public.payments enable row level security;
 alter table public.audit    enable row level security;
 alter table public.settings enable row level security;
 alter table public.images   enable row level security;
+
+create table if not exists notifications (id text primary key, data jsonb not null, created_at timestamptz default now());
+alter table notifications enable row level security;
+
+create table if not exists requests (id text primary key, data jsonb not null, created_at timestamptz default now());
+alter table requests enable row level security;
+
+create table if not exists invoices (id text primary key, data jsonb not null, created_at timestamptz default now());
+alter table invoices enable row level security;

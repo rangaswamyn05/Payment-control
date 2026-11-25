@@ -45,8 +45,8 @@ async function sendApi(api, event, payment, order) {
 async function dispatch(event, payment, order, settings) {
   const results = [];
   const api = settings && settings.connectors && settings.connectors.api;
-  if (api && api.enabled && api.url && !validateUrl(api.url)) results.push(await sendApi(api, event, payment, order));
-  if (event !== 'test') { const r = await appendRow('Payments', [new Date().toISOString(), event, payment.id, order.code, payment.amount, payment.mode, payment.date, payment.txnId || '', payment.status]); if (r) results.push(r); }
+  if (api && apiOn(settings) && api.url && !validateUrl(api.url)) results.push(await sendApi(api, event, payment, order));
+  if (event !== 'test' && sheetOn(settings)) { const r = await appendRow('Payments', [new Date().toISOString(), event, payment.id, order.code, payment.amount, payment.mode, payment.date, payment.txnId || '', payment.status]); if (r) results.push(r); }
   return results;
 }
 
@@ -81,7 +81,10 @@ async function appendRow(tab, row) {
     return { connector: 'sheets', ok: r.ok, status: r.status };
   } catch (e) { return { connector: 'sheets', ok: false, error: String(e && e.message || e).slice(0, 120) }; }
 }
-async function dispatchOrder(event, order) {
+const sheetOn = st => !!st && ['app_sheet', 'all'].includes(st.storage);
+const apiOn = st => !!(st && st.connectors && st.connectors.api && st.connectors.api.enabled) || (!!st && ['app_api', 'all'].includes(st.storage));
+async function dispatchOrder(event, order, settings) {
+  if (!sheetOn(settings)) return [];
   const r = await appendRow('Orders', [new Date().toISOString(), event, order.code, order.customer, order.total, order.createdBy || '', order.approvedBy || '']);
   return r ? [r] : [];
 }

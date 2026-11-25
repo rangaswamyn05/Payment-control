@@ -76,11 +76,16 @@ label .opt{color:var(--muted);font-weight:400}
 .sample{background:var(--warnbg);color:var(--warn);border-radius:6px;padding:4px 10px;font-size:12px;font-weight:600}
 .grid2{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start}
 .grid2>.a{flex:999 1 560px;min-width:0}.grid2>.b{flex:1 1 320px;min-width:0}
+.drop{border:2px dashed var(--line2);border-radius:14px;padding:22px 16px;display:flex;gap:14px;align-items:center;justify-content:center;text-align:left;cursor:pointer;background:#FBFCFD;margin-bottom:14px;min-height:96px}
+.drop.sm{min-height:70px;padding:12px}.drop:hover,.drop:focus-visible,.drop.hot{border-color:var(--acc);background:var(--acc2)}
+.drop .di{font-size:26px;color:var(--acc)}
+.tick{width:56px;height:56px;border-radius:28px;background:var(--goodbg);color:var(--good);margin:0 auto 12px;display:flex;align-items:center;justify-content:center;font-size:28px}
 @media(max-width:640px){.top{padding:0 14px}.wrap{padding:16px 14px}h1{font-size:24px}.kpi .v{font-size:26px}.nav{gap:0 16px;overflow-x:auto;flex-wrap:nowrap}}
 </style>
 </head>
 <body>
 <div id="app" aria-live="polite"></div>
 <script src="app.js"></script>
+<script src="flow.js"></script>
 </body>
 </html>

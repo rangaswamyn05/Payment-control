@@ -91,3 +91,12 @@ Static pages in `public/`, one serverless function in `api/index.js` (no depende
 - When an order is approved (or created by a manager), a row is appended to the **Orders** tab of your Google Sheet. Every payment event is appended to the **Payments** tab. The connector only appends; it never edits or deletes rows.
 - Setup: create a Google Cloud service account, share the sheet with its email as Editor, add tabs named `Orders` and `Payments`, then set in Vercel: `GOOGLE_SERVICE_ACCOUNT_EMAIL`, `GOOGLE_SERVICE_ACCOUNT_KEY` (the private key, with line breaks written as `\n`) and `SHEETS_ID`. Without these the connector stays off.
 - Tested against a mock Google only. It has not been run against a real sheet yet.
+
+## How it works now
+
+- Sales creates an order (ID, client, total, first advance screenshot). A manager or owner approves, changes and approves, or sends it back. Approval locks the total and creates the invoice.
+- Later payments need no approval. Drop or paste the screenshot; the app reads it. A screenshot without a transaction ID is refused. Cash, entries above the owner's limit and entries made by managers go to the owner.
+- Bank statements are matched by transaction ID. Unmatched items stay "validation pending" and are never marked wrong. Cash shows as manually validated, not system validated.
+- Owner: Settings (business, GST or tax number, customer fields, storage, limits), Reports with download, Clear old files (after download).
+- Storage choices that include a Google Sheet or your own system only append copies. The app always keeps every record.
+- Run `node test/api.test.js` and `node test/ui.test.js`.
