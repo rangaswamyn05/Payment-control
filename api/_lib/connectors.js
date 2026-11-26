@@ -46,6 +46,8 @@ async function dispatch(event, payment, order, settings) {
   const results = [];
   const api = settings && settings.connectors && settings.connectors.api;
   if (api && apiOn(settings) && api.url && !validateUrl(api.url)) results.push(await sendApi(api, event, payment, order));
+  const extra = (settings && settings.connectors && settings.connectors.extra) || [];
+  if (apiOn(settings)) for (const x of extra) if (x && x.url && !validateUrl(x.url)) results.push({ ...(await sendApi(x, event, payment, order)), name: x.name || '' });
   if (event !== 'test' && sheetOn(settings)) { const r = await appendRow('Payments', [new Date().toISOString(), event, payment.id, order.code, payment.amount, payment.mode, payment.date, payment.txnId || '', payment.status]); if (r) results.push(r); }
   return results;
 }

@@ -161,7 +161,7 @@ async function getSettings() {
   const s = (await db.get('settings', 'main')) || { id: 'main' };
   return {
     id: 'main', businessName: s.businessName || '', managerEmails: s.managerEmails || [],
-    connectors: { api: { enabled: false, url: '', key: '', ...((s.connectors && s.connectors.api) || {}) } },
+    connectors: { api: { enabled: false, url: '', key: '', ...((s.connectors && s.connectors.api) || {}) }, extra: (s.connectors && Array.isArray(s.connectors.extra) ? s.connectors.extra : []).slice(0, 5) },
     storage: STORAGE.includes(s.storage) ? s.storage : 'app',
     orderIdMode: s.orderIdMode === 'auto' ? 'auto' : 'own',
     business: { name: '', taxId: '', taxNA: false, address: '', contact: '', gstRate: '', kind: '', industry: '', ...(s.business || {}) },
@@ -377,7 +377,7 @@ async function route(req, res) {
       const api = s.connectors.api;
       const base = { businessName: s.businessName, onboarded: s.onboarded, orderIdMode: s.orderIdMode, customerFields: s.customerFields, business: { name: s.business.name, taxNA: s.business.taxNA } };
       if (RANK[me.role] < RANK.manager) return send(res, 200, { settings: base });
-      return send(res, 200, { settings: { ...base, managerEmails: s.managerEmails, storage: s.storage, business: s.business, limits: s.limits, accounts: s.accounts, lastExportAt: s.lastExportAt, connectors: { api: { enabled: !!api.enabled, url: me.role === 'owner' ? api.url || '' : '', keySet: !!api.key } } } });
+      return send(res, 200, { settings: { ...base, managerEmails: s.managerEmails, storage: s.storage, business: s.business, limits: s.limits, accounts: s.accounts, lastExportAt: s.lastExportAt, connectors: { api: { enabled: !!api.enabled, url: me.role === 'owner' ? api.url || '' : '', keySet: !!api.key }, extra: me.role === 'owner' ? s.connectors.extra.map(x => ({ id: x.id, name: x.name, url: x.url, keySet: !!x.key })) : [] } } });
     }
     if (m === 'PUT') {
       const me = await authed(req, url, 'owner');
@@ -394,7 +394,7 @@ async function route(req, res) {
       const next = {
         id: 'main', businessName: String(body.businessName !== undefined ? body.businessName : cur.businessName || biz.name).slice(0, 80),
         managerEmails: (Array.isArray(body.managerEmails) ? body.managerEmails : cur.managerEmails).map(x => String(x).trim()).filter(x => /^\S+@\S+\.\S+$/.test(x)).slice(0, 5),
-        connectors: { api: { enabled: !!inApi.enabled, url: inApi.url !== undefined ? String(inApi.url).trim() : curApi.url || '', key: inApi.key ? String(inApi.key) : curApi.key || '' } },
+        connectors: { extra: (Array.isArray(body.extraSystems) ? body.extraSystems : cur.connectors.extra).slice(0, 5).map(x => { const old = cur.connectors.extra.find(o => o.id === x.id) || {}; const u = String(x.url || '').trim(); if (u) { const bad = validateUrl(u); if (bad) throw new HttpErr(400, bad + ' (' + String(x.name || u).slice(0, 30) + ')'); } return { id: String(x.id || '').replace(/[^\w]/g, '').slice(0, 20) || 'sys_' + Math.random().toString(36).slice(2, 8), name: String(x.name || '').trim().slice(0, 40), url: u, key: x.key ? String(x.key) : old.key || '' }; }).filter(x => x.url), api: { enabled: !!inApi.enabled, url: inApi.url !== undefined ? String(inApi.url).trim() : curApi.url || '', key: inApi.key ? String(inApi.key) : curApi.key || '' } },
         storage: STORAGE.includes(body.storage) ? body.storage : cur.storage,
         orderIdMode: body.orderIdMode === 'auto' || body.orderIdMode === 'own' ? body.orderIdMode : cur.orderIdMode,
         business: biz, customerFields: cf,
@@ -414,9 +414,9 @@ async function route(req, res) {
       const api = s.connectors.api;
       if (!api || !api.url) throw new HttpErr(400, 'Save the API URL first');
       const bad = validateUrl(api.url); if (bad) throw new HttpErr(400, bad);
-      const r = await dispatch('test', { id: 'test', amount: 1, mode: 'upi', date: new Date().toISOString().slice(0, 16), txnId: 'TEST', status: 'client_reported' }, { code: 'TEST' }, { connectors: { api: { ...api, enabled: true } } });
+      const r = await dispatch('test', { id: 'test', amount: 1, mode: 'upi', date: new Date().toISOString().slice(0, 16), txnId: 'TEST', status: 'client_reported' }, { code: 'TEST' }, { connectors: { api: { ...api, enabled: true }, extra: s.connectors.extra } });
       await audit(me, 'api_test', 'settings', 'main', JSON.stringify(r[0] || {}));
-      return send(res, 200, { result: r[0] || null });
+      return send(res, 200, { result: r[0] || null, results: r });
     }
   }
 

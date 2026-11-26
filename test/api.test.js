@@ -247,6 +247,10 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
     r0 = await call('GET', 'summary?period=all&account=' + hdfc, null, mg); const inH = r0.j.received; r0 = await call('GET', 'summary?period=all&account=' + icici, null, mg); const inI = r0.j.received;
     ok('summary can be limited to one account', inH >= 3000 && inI === 0, JSON.stringify([inH, inI]));
     r0 = await call('PUT', 'settings', { accounts: [] }, ow); }
+  { // more than one business system
+    let r1 = await call('PUT', 'settings', { extraSystems: [{ name: 'Accounts', url: 'https://example.com/hook', key: 'k1' }, { name: 'CRM', url: 'https://crm.example.com/hook' }] }, ow); ok('owner saves two extra systems', r1.s === 200, JSON.stringify(r1.j));
+    r1 = await call('GET', 'settings', null, ow); const ex = r1.j.settings.connectors.extra; ok('extra systems listed, key never returned', ex.length === 2 && ex[0].keySet === true && !('key' in ex[0]), JSON.stringify(ex));
+    r1 = await call('PUT', 'settings', { extraSystems: [] }, ow); }
   console.log(bad ? '\n' + bad + ' FAILED' : '\nALL API TESTS PASSED');
   srv.close(); mock.close(); process.exit(bad ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

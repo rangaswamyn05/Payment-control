@@ -419,6 +419,10 @@ function accRow(x, i) {
   x = x || {};
   return `<div class="card" data-acc style="padding:12px;margin-bottom:8px"><input type="hidden" data-f="id" value="${esc(x.id || '')}"><div class="two field"><div><label>Account name</label><input class="in" data-f="name" value="${esc(x.name || '')}" placeholder="e.g. HDFC Current"></div><div><label>Bank</label><input class="in" data-f="bank" value="${esc(x.bank || '')}" placeholder="e.g. HDFC"></div></div><div class="two field"><div><label>Last 4 digits of the account number</label><input class="in" data-f="last4" inputmode="numeric" maxlength="4" value="${esc(x.last4 || '')}" placeholder="4321"></div><div><label>UPI ID(s) for this account <span class="opt">(comma separated)</span></label><input class="in" data-f="upi" value="${esc((x.upi || []).join(', '))}" placeholder="shop@okhdfcbank"></div></div><button class="btn" type="button" data-rmacc>Remove</button></div>`;
 }
+function sysRow(x) {
+  x = x || {};
+  return `<div class="card" data-sys style="padding:12px;margin-bottom:8px"><input type="hidden" data-f="id" value="${esc(x.id || '')}"><div class="field"><label>Name of this system</label><input class="in" data-f="name" value="${esc(x.name || '')}" placeholder="e.g. Accounts software"></div><div class="field"><label>Endpoint URL</label><input class="in" data-f="url" placeholder="https://..." value="${esc(x.url || '')}"></div><div class="field"><label>Secret key ${x.keySet ? '<span class="opt">(saved, leave blank to keep it)</span>' : ''}</label><input type="password" class="in" autocomplete="off" data-f="key"></div><button class="btn" type="button" data-rmsys>Remove</button></div>`;
+}
 async function viewSettings() {
   const { settings: s } = await api('GET', 'settings');
   const a = s.connectors.api, b = s.business, lm = s.limits;
@@ -443,9 +447,14 @@ async function viewSettings() {
   <h2 style="margin:20px 0 6px">Integrate with my business systems <span class="opt">(optional)</span></h2><div class="muted" style="font-size:13px;margin-bottom:10px">Choose yes if you want approved orders and payments sent to your own system automatically.</div><div class="field"><label><input type="checkbox" id="ae" ${a.enabled ? 'checked' : ''} style="width:18px;height:18px;vertical-align:-3px;margin-right:8px">Yes, integrate and update payment info in my business systems</label></div>
   <div class="field"><label for="au">Endpoint URL</label><input id="au" class="in" placeholder="https://your-panel.example.com/api/record-payment" value="${esc(a.url)}"></div>
   <div class="field"><label for="ak">Secret key ${a.keySet ? '<span class="opt">(saved, leave blank to keep it)</span>' : ''}</label><input id="ak" type="password" class="in" autocomplete="off"></div>
+  <div id="syss">${((s.connectors.extra) || []).map(sysRow).join('')}</div><button class="btn" type="button" id="addsys" style="margin-bottom:10px">+ Add another system</button>
   <div class="err" id="serr" style="min-height:18px"></div><div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn p" type="submit">Save settings</button><button class="btn" type="button" data-act="testApi">Send a test call</button></div></div>
   <div class="card b"><h2 style="margin-bottom:10px">This workspace</h2><div style="display:flex;flex-direction:column;gap:8px"><div>Storage: <b>${S.health.db === 'supabase' ? 'Database connected' : 'Demo (temporary)'}</b></div><div>Screenshot reading: <b>${S.health.ocr ? 'On' : 'Off'}</b></div></div><p class="muted" style="font-size:13px;margin-top:14px">Approval rules, dashboard views and alerts you can set here today are the limits above. Setting them by chat is planned.</p></div></form>`,
     after() {
+      const syss = document.getElementById('syss');
+      document.getElementById('addsys').addEventListener('click', () => { syss.insertAdjacentHTML('beforeend', sysRow({})); });
+      syss.addEventListener('click', e => { const b = e.target.closest('[data-rmsys]'); if (b) b.closest('[data-sys]').remove(); });
+      const readSys = () => [...syss.querySelectorAll('[data-sys]')].map(r => { const g = f => r.querySelector(`[data-f=${f}]`).value.trim(); return { id: g('id'), name: g('name'), url: g('url'), key: g('key') }; }).filter(x => x.url);
       const accs = document.getElementById('accs');
       document.getElementById('addacc').addEventListener('click', () => { accs.insertAdjacentHTML('beforeend', accRow({})); });
       accs.addEventListener('click', e => { const b = e.target.closest('[data-rmacc]'); if (b) b.closest('[data-acc]').remove(); });
@@ -459,7 +468,7 @@ async function viewSettings() {
         try {
           if (!v('ba').trim()) throw new Error('Enter your business address. It goes on every invoice');
           if (!bn.checked && !v('bt').trim()) throw new Error('Enter your GST or tax number, or tick that it is not applicable');
-          await api('PUT', 'settings', { accounts: readAccs(), businessName: v('bz'), onboarded: true, storage: v('st'), orderIdMode: v('om'), invoiceSampleId: sampleId,
+          await api('PUT', 'settings', { accounts: readAccs(), extraSystems: readSys(), businessName: v('bz'), onboarded: true, storage: v('st'), orderIdMode: v('om'), invoiceSampleId: sampleId,
             business: { name: v('bz'), kind: v('bk'), industry: v('bi'), gstRate: v('bg'), taxId: v('bt'), taxNA: bn.checked, address: v('ba'), contact: v('bc') },
             customerFields: v('cf').split(',').map(x => ({ label: x.trim() })).filter(x => x.label),
             limits: { singlePayment: v('l1').replace(/,/g, ''), collectionThreshold: v('l2').replace(/,/g, '') },
