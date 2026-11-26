@@ -98,7 +98,7 @@ function parseUpi(raw) {
   if (amts.length) out.amount = amts[0];
   if (amts.length && amts.unsure) { out.amountUnsure = true; const st = String(out.amount); if (st.length > 1 && st[0] === '2' && Number(st.slice(1)) > 0) out.altAmount = Number(st.slice(1)); }
   out.candidates = [...new Set(amts)].slice(0, 5);
-  { const pm = /(?:^|[^\d])(?:\+?91[\s-]?)?([6-9]\d{4}[\s-]?\d{5})(?!\d)/.exec(text.replace(/XXXX\d+/gi, '')); if (pm) out.phone = pm[1].replace(/\D/g, ''); }
+  { const pm = /(?:^|[^\d])(?:\+?91[\s-]?)?([6-9]\d{4}[\s-]?\d{5})(?!\d)/.exec(text.replace(/\S*@\S*/g, ' ').replace(/XXXX\d+/gi, '')); if (pm) out.phone = pm[1].replace(/\D/g, ''); }
 
   const d = parseDate(flat);
   if (d) { out.date = d.date; out.time = d.time; }
