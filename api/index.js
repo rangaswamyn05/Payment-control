@@ -79,6 +79,7 @@ function sums(pays) {
   return s;
 }
 
+const digits = x => String(x || '').replace(/\D/g, '');
 const NOTE_MANUAL = 'Manually validated, not system validated';
 const NOTE_PROVIDE = 'Provide statements to validate';
 const NOTE_UNABLE = 'Unable to validate with the statements provided. Provide another statement.';
@@ -102,7 +103,7 @@ function orderView(o, allPays) {
   else if (claimed > 0) validation = s.manual > 0 ? 'manual' : 'validated';
   return {
     id: o.id, code: o.code, customer: o.customer, total: o.total, status: o.status, note: o.note || '', created: o.created, demo: !!o.demo,
-    customerExtra: o.customerExtra || {}, createdBy: o.createdBy || '', rejectReason: o.rejectReason || '', modifications: o.modifications || [],
+    customerExtra: o.customerExtra || {}, phone: o.phone || '', createdBy: o.createdBy || '', rejectReason: o.rejectReason || '', modifications: o.modifications || [],
     verified: s.verified, awaiting: s.unverified, flagged: s.flagged,
     collected: claimed, validated: s.validated, manual: s.manual, notValidated: s.unverified, validation,
     validationNote: validation === 'unable' ? NOTE_UNABLE : validation === 'pending' ? NOTE_PROVIDE : validation === 'owner' ? 'Cash waiting for owner approval' : validation === 'manual' ? NOTE_MANUAL : '',
@@ -133,6 +134,7 @@ async function getSettings() {
     id: 'main', businessName: s.businessName || '', managerEmails: s.managerEmails || [],
     connectors: { api: { enabled: false, url: '', key: '', ...((s.connectors && s.connectors.api) || {}) } },
     storage: STORAGE.includes(s.storage) ? s.storage : 'app',
+    orderIdMode: s.orderIdMode === 'auto' ? 'auto' : 'own',
     business: { name: '', taxId: '', taxNA: false, address: '', contact: '', gstRate: '', kind: '', industry: '', ...(s.business || {}) },
     customerFields: Array.isArray(s.customerFields) ? s.customerFields : [],
     limits: { singlePayment: 0, collectionThreshold: 0, ...(s.limits || {}) },
@@ -241,7 +243,7 @@ function invoiceHtml(o, v, inv, settings, pays) {
   const extra = settings.customerFields.map(f => `<div>${esc(f.label)}: ${esc((o.customerExtra || {})[f.key] || '')}</div>`).join('');
   return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(inv.no)}</title><style>body{font:15px system-ui,sans-serif;max-width:720px;margin:32px auto;padding:0 20px;color:#111}h1{font-size:22px;margin:0}table{width:100%;border-collapse:collapse;margin:14px 0}td,th{padding:8px;border-bottom:1px solid #ddd;text-align:left}.r{text-align:right}.big{font-size:18px;font-weight:700}@media print{.np{display:none}}</style></head><body>
 <div style="display:flex;justify-content:space-between"><div><h1>${esc(b.name || settings.businessName || 'Invoice')}</h1><div>${esc(b.address)}</div><div>${esc(b.contact)}</div><div>${b.taxNA ? '' : 'GST / Tax no: ' + esc(b.taxId)}</div></div><div style="text-align:right"><div class="big">Invoice ${esc(inv.no)}</div><div>${esc(String(inv.created || '').slice(0, 10))}</div></div></div>
-<hr><div><b>Bill to:</b> ${esc(o.customer)}</div>${extra}<div>Order: ${esc(o.code)}</div>
+<hr><div><b>Bill to:</b> ${esc(o.customer)}</div>${extra}<div>Phone: ${esc(o.phone || '')}</div><div>Order: ${esc(o.code)}</div>
 <table><tr><th>Date</th><th>Mode</th><th class="r">Paid</th></tr>${rows}</table>
 <table><tr><td>Order total</td><td class="r big">${esc(inr(o.total))}</td></tr><tr><td>Paid so far</td><td class="r">${esc(inr(v.collected))}</td></tr><tr><td>Balance</td><td class="r big">${esc(inr(v.outstanding))}</td></tr></table>
 <p class="np"><button onclick="print()">Print or save as PDF</button></p></body></html>`;
@@ -328,7 +330,7 @@ async function route(req, res) {
       const me = await authed(req, url, 'uploader');
       const s = await getSettings();
       const api = s.connectors.api;
-      const base = { businessName: s.businessName, onboarded: s.onboarded, customerFields: s.customerFields, business: { name: s.business.name, taxNA: s.business.taxNA } };
+      const base = { businessName: s.businessName, onboarded: s.onboarded, orderIdMode: s.orderIdMode, customerFields: s.customerFields, business: { name: s.business.name, taxNA: s.business.taxNA } };
       if (RANK[me.role] < RANK.manager) return send(res, 200, { settings: base });
       return send(res, 200, { settings: { ...base, managerEmails: s.managerEmails, storage: s.storage, business: s.business, limits: s.limits, lastExportAt: s.lastExportAt, connectors: { api: { enabled: !!api.enabled, url: me.role === 'owner' ? api.url || '' : '', keySet: !!api.key } } } });
     }
@@ -349,6 +351,7 @@ async function route(req, res) {
         managerEmails: (Array.isArray(body.managerEmails) ? body.managerEmails : cur.managerEmails).map(x => String(x).trim()).filter(x => /^\S+@\S+\.\S+$/.test(x)).slice(0, 5),
         connectors: { api: { enabled: !!inApi.enabled, url: inApi.url !== undefined ? String(inApi.url).trim() : curApi.url || '', key: inApi.key ? String(inApi.key) : curApi.key || '' } },
         storage: STORAGE.includes(body.storage) ? body.storage : cur.storage,
+        orderIdMode: body.orderIdMode === 'auto' || body.orderIdMode === 'own' ? body.orderIdMode : cur.orderIdMode,
         business: biz, customerFields: cf,
         limits: { singlePayment: Math.max(0, r2(lm.singlePayment) || 0), collectionThreshold: Math.max(0, r2(lm.collectionThreshold) || 0) },
         onboarded: body.onboarded !== undefined ? !!body.onboarded : cur.onboarded, invoiceSampleId: body.invoiceSampleId !== undefined ? String(body.invoiceSampleId).slice(0, 40) : cur.invoiceSampleId, lastExportAt: cur.lastExportAt, lastExportById: cur.lastExportById,
@@ -421,6 +424,13 @@ async function route(req, res) {
       const n = (await db.all('payments')).filter(p => p.orderCode === o.code && p.status !== 'rejected').length;
       return send(res, 200, { code: o.code, customer: o.customer, total: o.total, closed: o.status === 'closed', pending: o.status === 'pending', rejected: o.status === 'rejected', nextPayment: n + 1 });
     }
+    if (b === 'by-phone' && c && m === 'GET') {
+      await authed(req, url, 'uploader');
+      const d = digits(c);
+      if (d.length < 7) return send(res, 200, { orders: [] });
+      const list = (await db.all('orders')).filter(o => o.status === 'open' && o.phone && digits(o.phone).endsWith(d.slice(-10)) );
+      return send(res, 200, { orders: list.map(o => ({ code: o.code, customer: o.customer, total: o.total })) });
+    }
     if (b === 'mine' && m === 'GET') {
       const me = await authed(req, url, 'uploader');
       const list = (await db.all('orders')).filter(o => o.createdById === me.id).reverse();
@@ -448,8 +458,15 @@ async function route(req, res) {
       const total = r2(body.total);
       if (!(total > 0)) throw new HttpErr(400, 'Enter the order total');
       if (!String(body.customer || '').trim()) throw new HttpErr(400, 'Enter the client name');
-      let code = String(body.code || '').trim();
-      if (!code) { const n = orders.map(o => /^ORD-(\d+)$/.exec(o.code)).filter(Boolean).map(x => +x[1]); code = 'ORD-' + ((n.length ? Math.max(...n) : 1000) + 1); }
+      let code = settings.orderIdMode === 'auto' ? '' : String(body.code || '').trim();
+      if (!code) {
+        if (settings.orderIdMode !== 'auto') throw new HttpErr(400, 'Enter the order ID');
+        const n = orders.map(o => /^ORD-(\d+)$/.exec(o.code)).filter(Boolean).map(x => +x[1]); code = 'ORD-' + ((n.length ? Math.max(...n) : 1000) + 1);
+      }
+      const phoneDigits = digits(body.phone);
+      if (phoneDigits.length < 7 || phoneDigits.length > 15) throw new HttpErr(400, 'Enter the customer’s phone number');
+      const same = orders.filter(o => o.phone && digits(o.phone).slice(-10) === phoneDigits.slice(-10) && o.status !== 'rejected');
+      if (same.length && body.confirmSamePhone !== true) throw new HttpErr(409, `This phone number already has ${same.length === 1 ? 'order ' + same[0].code : same.length + ' orders'}. Is it the same customer?`, { samePhone: same.slice(0, 5).map(o => ({ code: o.code, customer: o.customer, status: o.status })) });
       if (!/^[A-Za-z0-9._-]{2,24}$/.test(code)) throw new HttpErr(400, 'Order ID can use letters, numbers, dot, dash and underscore');
       if (orders.some(o => lc(o.code) === lc(code))) throw new HttpErr(409, 'That order ID already exists. To add a payment to it, use Add payment.');
       const customerExtra = readExtra(body.customerExtra, {});
@@ -457,7 +474,7 @@ async function route(req, res) {
       if (!body.firstPayment && !isMgr) throw new HttpErr(400, 'Add the first advance payment screenshot with the order');
       let first = null;
       if (body.firstPayment) first = await addPayment(me, { code, status: 'pending' }, { ...body.firstPayment, seq: 1 }, { first: true });
-      const o = await db.insert('orders', { code, customer: String(body.customer).trim().slice(0, 80), total, status: isMgr ? 'open' : 'pending', note: String(body.note || '').slice(0, 200), createdBy: me.name, createdById: me.id, customerExtra });
+      const o = await db.insert('orders', { code, customer: String(body.customer).trim().slice(0, 80), total, status: isMgr ? 'open' : 'pending', note: String(body.note || '').slice(0, 200), createdBy: me.name, createdById: me.id, customerExtra, phone: String(body.phone).trim().slice(0, 20) });
       await audit(me, 'order_created', 'order', o.code, `${o.customer}, total ${o.total}${o.status === 'pending' ? ', waiting for approval' : ''}`);
       if (o.status === 'open') await afterApprove(me, o, settings);
       else await notify('role:manager', `New order ${o.code} (${o.customer}, ${inr(o.total)}) is waiting for approval.`, o.code);

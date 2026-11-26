@@ -10,6 +10,7 @@ async function call(method, path, body, tok) {
   return { s: r.status, j };
 }
 const login = async u => (await call('POST', 'login', { username: u, password: 'demo1234' })).j.token;
+let phn = 9000000000; const P = () => String(++phn);
 const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 
 (async () => {
@@ -105,8 +106,8 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
   ok('adjust needs a comment', (await call('POST', 'orders/DEMO-1003/adjust', { kind: 'change_total', newTotal: 90000, comment: '' }, ow)).s === 400);
 
   // orders & summary
-  r = await call('POST', 'orders', { code: 'T-1', customer: 'Test client', total: 1000 }, mg); ok('manager creates an order', r.s === 200);
-  ok('duplicate order id refused on create', (await call('POST', 'orders', { code: 't-1', customer: 'x', total: 5 }, up)).s === 409);
+  r = await call('POST', 'orders', { phone: P(), code: 'T-1', customer: 'Test client', total: 1000 }, mg); ok('manager creates an order', r.s === 200);
+  ok('duplicate order id refused on create', (await call('POST', 'orders', { phone: P(), code: 't-1', customer: 'x', total: 5 }, up)).s === 409);
   ok('manager cannot change total after approval', (await call('PATCH', 'orders/DEMO-1001', { total: 90000 }, mg)).s === 403);
   ok('owner can change total (audited)', (await call('PATCH', 'orders/DEMO-1001', { total: 100000 }, ow)).s === 200);
   r = await call('POST', 'orders/DEMO-1001/close', {}, mg); ok('close blocked while not fully verified', r.s === 409);
@@ -118,9 +119,9 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
   // sales creates, manager modifies and approves
   r = await call('POST', 'settings', null, ow);
   r = await call('PUT', 'settings', { customerFields: [{ label: 'Phone number' }] }, ow); ok('owner chooses customer fields at setup', r.s === 200);
-  r = await call('POST', 'orders', { code: 'S-1', customer: 'Sales client', total: 50000, firstPayment: { mode: 'upi', amount: 10000, date: '2026-11-25', txnId: 'ADV-1', imageId: img } }, up);
+  r = await call('POST', 'orders', { phone: P(), code: 'S-1', customer: 'Sales client', total: 50000, firstPayment: { mode: 'upi', amount: 10000, date: '2026-11-25', txnId: 'ADV-1', imageId: img } }, up);
   ok('missing phone number is refused', r.s === 400 && /phone number/i.test(r.j.error));
-  const ord = { code: 'S-1', customer: 'Sales client', total: 50000, customerExtra: { f0_phonenumber: '9990001111' }, firstPayment: { mode: 'upi', amount: 10000, date: '2026-11-25', txnId: 'ADV-1', imageId: img } };
+  const ord = { phone: '98765 43210', code: 'S-1', customer: 'Sales client', total: 50000, customerExtra: { f0_phonenumber: '9990001111' }, firstPayment: { mode: 'upi', amount: 10000, date: '2026-11-25', txnId: 'ADV-1', imageId: img } };
   r = await call('POST', 'orders', { ...ord, firstPayment: undefined }, up); ok('sales must attach the first advance screenshot', r.s === 400);
   r = await call('POST', 'orders', { ...ord, firstPayment: { ...ord.firstPayment, txnId: '' } }, up); ok('first advance with no transaction ID is rejected', r.s === 400);
   r = await call('POST', 'orders', ord, up); ok('sales creates the order with its first advance', r.s === 200 && r.j.order.status === 'pending' && r.j.order.total === undefined);
@@ -133,12 +134,24 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
   ok('an invoice exists after approval', (await call('GET', 'orders/S-1', null, mg)).j.invoice === true);
   r = await fetch(base + '/api/invoices/S-1?t=' + mg); const html = await r.text(); ok('invoice shows order, client, total, paid and balance', r.status === 200 && html.includes('S-1') && html.includes('Sales client') && html.includes('40,000') && html.includes('30,000'), html.slice(0, 200));
   ok('total is locked for managers after approval', (await call('PATCH', 'orders/S-1', { total: 1 }, mg)).s === 403);
-  r = await call('POST', 'orders', { ...ord, code: 'S-2', firstPayment: { ...ord.firstPayment, txnId: 'ADV-2' } }, up);
+  r = await call('POST', 'orders', { ...ord, phone: P(), code: 'S-2', firstPayment: { ...ord.firstPayment, txnId: 'ADV-2' } }, up);
   ok('manager rejects with a reason; sales is told', (await call('POST', 'orders/S-2/reject', {}, mg)).s === 400 && (await call('POST', 'orders/S-2/reject', { reason: 'Wrong total' }, mg)).j.order.status === 'rejected' && (await call('GET', 'notifications', null, up)).j.notifications.some(n => /S-2.*sent back/.test(n.text)));
   ok('another sales person cannot resubmit it', (await call('POST', 'orders/S-2/resubmit', {}, await (async () => { await call('POST', 'users', { name: 'Sales Two', username: 'sales2', password: 'longpassword', role: 'uploader' }, ow); return (await call('POST', 'login', { username: 'sales2', password: 'longpassword' })).j.token; })())).s === 403);
   r = await call('GET', 'orders/mine', null, up); ok('sales sees own orders and the reject reason', r.j.orders.some(o => o.code === 'S-2'));
   r = await call('POST', 'orders/S-2/resubmit', { total: 20000 }, up); ok('sales fixes and resubmits a rejected order', r.s === 200 && r.j.order.status === 'pending');
   ok('approval is in the audit log', (await call('GET', 'audit', null, ow)).j.audit.some(e => e.action === 'order_modified_approved'));
+
+  // phone number: mandatory, duplicate warning, lookup, order ID mode
+  r = await call('POST', 'orders', { ...ord, code: 'S-9', phone: '', firstPayment: { ...ord.firstPayment, txnId: 'ADV-9' } }, up); ok('phone number is mandatory', r.s === 400 && /phone/i.test(r.j.error));
+  r = await call('POST', 'orders', { ...ord, code: 'S-9', firstPayment: { ...ord.firstPayment, txnId: 'ADV-9' } }, up); ok('same phone on a new order asks "same customer?"', r.s === 409 && r.j.samePhone && r.j.samePhone[0].code === 'S-1');
+  r = await call('POST', 'orders', { ...ord, code: 'S-9', confirmSamePhone: true, firstPayment: { ...ord.firstPayment, txnId: 'ADV-9' } }, up); ok('sales can go ahead after the warning', r.s === 200);
+  r = await call('GET', 'orders/by-phone/98765%2043210', null, up); ok('sales types the phone and sees that customer’s open orders', r.s === 200 && r.j.orders.length === 1 && r.j.orders[0].code === 'S-1', JSON.stringify(r.j));
+  ok('short numbers return nothing', (await call('GET', 'orders/by-phone/123', null, up)).j.orders.length === 0);
+  await call('PUT', 'settings', { customerFields: [], orderIdMode: 'auto' }, ow);
+  r = await call('POST', 'orders', { phone: P(), code: 'IGNORED', customer: 'Auto client', total: 500, firstPayment: { mode: 'cash', amount: 100, date: '2026-11-25' } }, up);
+  ok('automatic mode ignores typed IDs and numbers the order itself', r.s === 200 && /^ORD-\d+$/.test(r.j.order.code), JSON.stringify(r.j));
+  await call('PUT', 'settings', { orderIdMode: 'own' }, ow);
+  r = await call('POST', 'orders', { phone: P(), customer: 'No id', total: 500, firstPayment: { mode: 'cash', amount: 100, date: '2026-11-25' } }, up); ok('own-ID mode requires an order ID', r.s === 400);
 
   // reports and clear
   r = await call('GET', 'reports?period=all', null, ow); ok('owner report: revenue, collected, outstanding, validated, manual', r.s === 200 && r.j.report.revenue > 0 && r.j.report.manual > 0 && r.j.report.validated > 0);
@@ -166,7 +179,7 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
   process.env.SHEETS_ID = 'sheet1'; process.env.GOOGLE_TOKEN_URL = 'http://localhost:' + gp + '/token'; process.env.SHEETS_API_BASE = 'http://localhost:' + gp;
   await call('PUT', 'settings', { customerFields: [] }, ow);
   await call('PUT', 'settings', { storage: 'app_sheet' }, ow);
-  r = await call('POST', 'orders', { customer: '=HYPERLINK("x")', total: 7000, firstPayment: { mode: 'upi', amount: 1000, date: '2026-11-25', txnId: 'SH-1', imageId: (await call('POST', 'images', { dataUrl: PNG }, up)).j.id } }, up);
+  r = await call('POST', 'orders', { phone: P(), code: 'SH-1', customer: '=HYPERLINK("x")', total: 7000, firstPayment: { mode: 'upi', amount: 1000, date: '2026-11-25', txnId: 'SH-1', imageId: (await call('POST', 'images', { dataUrl: PNG }, up)).j.id } }, up);
   await call('POST', 'orders/' + r.j.order.code + '/approve', {}, mg);
   const ap = gl.find(g => g.u.includes('/values/Orders'));
   ok('approval appends the order to the Orders tab, with a Google sign-in', !!ap && ap.h.authorization === 'Bearer tok123' && gl.some(g => g.u.startsWith('/token') && g.d.includes('assertion=')));

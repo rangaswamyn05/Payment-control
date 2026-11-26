@@ -90,13 +90,23 @@ function viewAdd() {
   const P = A.P, i = A.info;
   const opts = i ? Array.from({ length: Math.max(8, i.nextPayment + 3) }, (_, k) => k + 1).map(n => `<option value="${n}" ${String(A.seq || i.nextPayment) === String(n) ? 'selected' : ''}>Payment ${n}${n === i.nextPayment ? ' (next)' : ''}</option>`).join('') : '';
   return { active: '#/add', html: `<div style="max-width:520px;margin:0 auto"><div class="head" style="margin-bottom:12px"><h1 style="font-size:24px">Add payment</h1></div>
-  <div class="card" style="margin-bottom:14px"><div class="field" style="margin:0"><label for="f_o">Order ID</label><input id="f_o" class="in" value="${esc(A.orderCode)}" autocapitalize="characters" autocomplete="off"><div id="ohint" class="${A.orderErr ? 'err' : 'ok'}" style="min-height:20px;margin-top:6px">${A.orderErr ? esc(A.orderErr) : i ? `${esc(i.customer)} · order total ${inr(i.total)}` : ''}</div></div>
+  <div class="card" style="margin-bottom:14px"><div class="field"><label for="f_ph">Customer phone number <span class="opt">(finds their orders)</span></label><input id="f_ph" class="in" inputmode="tel" value="${esc(A.phone || '')}" autocomplete="off">${(A.byPhone || []).length ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">${A.byPhone.map(o => `<button type="button" class="btn s" data-pick="${esc(o.code)}">${esc(o.code)} · ${esc(o.customer)}</button>`).join('')}</div>` : A.phoneTried ? '<div class="muted" style="font-size:13px;margin-top:6px">No open orders for that number.</div>' : ''}</div><div class="field" style="margin:0"><label for="f_o">Order ID</label><input id="f_o" class="in" value="${esc(A.orderCode)}" autocapitalize="characters" autocomplete="off"><div id="ohint" class="${A.orderErr ? 'err' : 'ok'}" style="min-height:20px;margin-top:6px">${A.orderErr ? esc(A.orderErr) : i ? `${esc(i.customer)} · order total ${inr(i.total)}` : ''}</div></div>
   ${i && !A.orderErr ? `<div class="field" style="margin:8px 0 0"><label for="f_s">Which payment is this?</label><select id="f_s" class="in">${opts}</select></div>` : ''}
   ${A.needReason ? `<div class="field" style="margin:12px 0 0"><div class="note warn" style="margin-bottom:8px">This looks like payment ${A.needReason}, but you picked ${esc(A.seq)}. Write why, then save again.</div><input id="f_sr" class="in" placeholder="Reason" value="${esc(A.seqReason)}"></div>` : ''}</div>
   <div class="card"><form id="af" novalidate>${payFields(P)}<div class="err" id="aerr" style="min-height:18px;margin-bottom:6px">${esc(A.err || P.err || '')}</div><button class="btn p" type="submit" style="width:100%;min-height:52px" ${A.busy || P.busy ? 'disabled' : ''}>Save payment</button></form></div></div>`,
     after() {
       const redraw = () => render();
       wirePay(P, redraw);
+      const fp = document.getElementById('f_ph'); let pt;
+      fp.addEventListener('input', () => {
+        A.phone = fp.value; clearTimeout(pt);
+        pt = setTimeout(async () => {
+          if (A.phone.replace(/\D/g, '').length < 7) { A.byPhone = []; A.phoneTried = false; return; }
+          try { A.byPhone = (await api('GET', 'orders/by-phone/' + encodeURIComponent(A.phone))).orders; A.phoneTried = true; } catch (e) { A.byPhone = []; }
+          render().then(() => { const e2 = document.getElementById('f_ph'); if (e2) { e2.focus(); e2.setSelectionRange(e2.value.length, e2.value.length); } });
+        }, 400);
+      });
+      document.querySelectorAll('[data-pick]').forEach(b => b.addEventListener('click', () => { A.orderCode = b.dataset.pick; A.info = null; A.orderErr = ''; A.seq = ''; A.byPhone = []; A.phoneTried = false; A.phone = ''; fo.value = A.orderCode; fo.dispatchEvent(new Event('input')); }));
       const fo = document.getElementById('f_o');
       let tm; fo.addEventListener('input', () => {
         A.orderCode = fo.value; A.info = null; A.orderErr = ''; A.seq = ''; A.needReason = null; clearTimeout(tm);
@@ -129,12 +139,12 @@ function viewAdd() {
 // ---------- New order (sales) ----------
 async function viewNewOrder() {
   const { settings } = await api('GET', 'settings');
-  const N = S.newOrder || (S.newOrder = { code: '', customer: '', total: '', extra: {}, P: newPay(), err: '', busy: false, done: null });
+  const N = S.newOrder || (S.newOrder = { code: '', phone: '', customer: '', total: '', extra: {}, P: newPay(), err: '', busy: false, done: null });
   if (N.done) return { active: '#/new-order', html: `<div style="max-width:520px;margin:0 auto"><div class="card" style="text-align:center;padding:32px 20px"><div class="tick">✓</div><h2 style="font-size:20px">Sent for approval</h2><p><b>${esc(N.done.code)}</b> · ${esc(N.done.customer)}</p><p class="muted">A manager or the owner will approve it. You will see a note in your Inbox if anything changes.</p><button class="btn p" style="width:100%;margin-top:14px" data-act="anotherOrder">Create another order</button></div></div>`, after() { DROP.cur = null; } };
-  const P = N.P;
+  const P = N.P, auto = settings.orderIdMode === 'auto';
   const extras = (settings.customerFields || []).map(f => `<div class="field"><label for="x_${f.key}">${esc(f.label)}</label><input id="x_${f.key}" class="in" data-x="${f.key}" value="${esc(N.extra[f.key] || '')}"></div>`).join('');
   return { active: '#/new-order', html: `<div style="max-width:520px;margin:0 auto"><div class="head" style="margin-bottom:12px"><h1 style="font-size:24px">New order</h1></div>
-  <form id="nf" novalidate><div class="card" style="margin-bottom:14px"><div class="two field"><div><label for="oc">Order ID</label><input id="oc" class="in" data-n="code" value="${esc(N.code)}" autocapitalize="characters" autocomplete="off"></div><div><label for="ot">Total order value (₹)</label><input id="ot" class="in" data-n="total" inputmode="decimal" value="${esc(N.total)}"></div></div>
+  <form id="nf" novalidate><div class="card" style="margin-bottom:14px"><div class="field"><label for="oph">Customer phone number</label><input id="oph" class="in" data-n="phone" inputmode="tel" value="${esc(N.phone)}" autocomplete="off"></div><div class="two field">${auto ? '<div><label>Order ID</label><div class="muted" style="padding:12px 0">Created for you</div></div>' : `<div><label for="oc">Order ID</label><input id="oc" class="in" data-n="code" value="${esc(N.code)}" autocapitalize="characters" autocomplete="off"></div>`}<div><label for="ot">Total order value (₹)</label><input id="ot" class="in" data-n="total" inputmode="decimal" value="${esc(N.total)}"></div></div>
   <div class="field"><label for="ocu">Client name</label><input id="ocu" class="in" data-n="customer" value="${esc(N.customer)}"></div>${extras}</div>
   <div class="card"><h2 style="margin-bottom:10px">First advance payment</h2>${payFields(P)}<div class="err" id="nerr" style="min-height:18px;margin-bottom:6px">${esc(N.err || P.err || '')}</div><button class="btn p" type="submit" style="width:100%;min-height:52px" ${N.busy || P.busy ? 'disabled' : ''}>Send for approval</button></div></form></div>`,
     after() {
@@ -143,11 +153,12 @@ async function viewNewOrder() {
       document.querySelectorAll('[data-x]').forEach(el => el.addEventListener('input', () => { N.extra[el.dataset.x] = el.value; }));
       document.getElementById('nf').addEventListener('submit', async e => {
         e.preventDefault(); N.err = ''; P.err = '';
-        if (!N.code.trim()) N.err = 'Enter the order ID.'; else if (!N.customer.trim()) N.err = 'Enter the client name.'; else if (!(Number(String(N.total).replace(/,/g, '')) > 0)) N.err = 'Enter the total order value.';
+        if (N.phone.replace(/\D/g, '').length < 7) N.err = 'Enter the customer’s phone number.'; else if (!auto && !N.code.trim()) N.err = 'Enter the order ID.'; else if (!N.customer.trim()) N.err = 'Enter the client name.'; else if (!(Number(String(N.total).replace(/,/g, '')) > 0)) N.err = 'Enter the total order value.';
         else N.err = payCheck(P);
         if (N.err) { document.getElementById('nerr').textContent = N.err; return; }
         N.busy = true; render();
-        try { const r = await api('POST', 'orders', { code: N.code.trim(), customer: N.customer, total: String(N.total).replace(/,/g, ''), customerExtra: N.extra, firstPayment: payBody(P) }); N.done = r.order; }
+        const send = confirmSame => api('POST', 'orders', { code: N.code.trim(), phone: N.phone, confirmSamePhone: confirmSame, customer: N.customer, total: String(N.total).replace(/,/g, ''), customerExtra: N.extra, firstPayment: payBody(P) });
+        try { let r; try { r = await send(false); } catch (ex) { if (ex.data && ex.data.samePhone) { const l = ex.data.samePhone.map(o => `${o.code} (${o.customer})`).join(', '); if (!(await confirmBox({ title: 'Same customer?', text: `This phone number already has: ${l}. If it is the same customer, check you are not creating a duplicate. Create a new order anyway?`, ok: 'Yes, new order' }))) { N.busy = false; render(); return; } r = await send(true); } else throw ex; } N.done = r.order; }
         catch (ex) { N.err = ex.message; }
         N.busy = false; render();
       });
@@ -281,6 +292,8 @@ async function viewSettings() {
   <div class="field"><label for="ba">Address</label><input id="ba" class="in" value="${esc(b.address)}"></div><div class="field"><label for="bc">Phone and email on the invoice</label><input id="bc" class="in" value="${esc(b.contact)}"></div>
   <div class="field"><label for="cf">What to collect about each customer <span class="opt">(comma separated, e.g. Phone number)</span></label><input id="cf" class="in" value="${esc((s.customerFields || []).map(f => f.label).join(', '))}"><div class="muted" style="font-size:13px;margin-top:4px">Sales enters these once, when creating an order. They appear on the invoice.</div></div>
   <div class="field"><label>Sample invoice <span class="opt">(optional)</span></label>${dropZone('iz', s.invoiceSampleId ? 'Sample added. Drop a new one to replace it' : 'Drop a sample invoice here', 1)}<div class="muted" style="font-size:13px;margin-top:4px">Invoices follow this style. If it shows details we do not collect, we will ask you.</div></div>
+  <h2 style="margin:20px 0 10px">Order IDs</h2>
+  <div class="field"><label for="om">How are orders numbered?</label>${sel('om', [['own', 'I use my own order IDs (sales types them)'], ['auto', 'Create order IDs for me']], s.orderIdMode)}<div class="muted" style="font-size:13px;margin-top:4px">Every order also needs the customer's phone number. It lets sales find a customer's orders and warns about duplicates.</div></div>
   <h2 style="margin:20px 0 10px">Where records are kept</h2>
   <div class="field"><label for="st">Storage</label>${sel('st', STORES, s.storage)}<div class="muted" style="font-size:13px;margin-top:4px">Payment Control always keeps every record. The others receive a copy of each approved order and payment. They are only added to, never edited or deleted. Approvals and roles stay here.</div></div>
   <h2 style="margin:20px 0 10px">Limits and alerts</h2><div class="two field"><div><label for="l1">Owner approval above (₹)</label><input id="l1" class="in" inputmode="decimal" value="${lm.singlePayment || ''}" placeholder="No limit"></div><div><label for="l2">Alert when an order collects more than (₹)</label><input id="l2" class="in" inputmode="decimal" value="${lm.collectionThreshold || ''}" placeholder="No alert"></div></div>
@@ -298,7 +311,7 @@ async function viewSettings() {
         e.preventDefault(); const er = document.getElementById('serr'); er.textContent = '';
         const v = id => document.getElementById(id).value;
         try {
-          await api('PUT', 'settings', { businessName: v('bz'), onboarded: true, storage: v('st'), invoiceSampleId: sampleId,
+          await api('PUT', 'settings', { businessName: v('bz'), onboarded: true, storage: v('st'), orderIdMode: v('om'), invoiceSampleId: sampleId,
             business: { name: v('bz'), kind: v('bk'), industry: v('bi'), gstRate: v('bg'), taxId: v('bt'), taxNA: bn.checked, address: v('ba'), contact: v('bc') },
             customerFields: v('cf').split(',').map(x => ({ label: x.trim() })).filter(x => x.label),
             limits: { singlePayment: v('l1').replace(/,/g, ''), collectionThreshold: v('l2').replace(/,/g, '') },

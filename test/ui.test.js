@@ -51,7 +51,7 @@ fs.mkdirSync('/tmp/pcshots', { recursive: true });
   await pg.click('#af button[type=submit]'); await pg.waitForSelector('text=Payment 1 saved');
   ok('cash tells sales the owner will approve it', (await pg.textContent('main')).includes('owner will approve'));
   await pg.goto(base + '/#/new-order'); await pg.waitForSelector('#nf');
-  await pg.fill('#oc', 'UI-1'); await pg.fill('#ocu', 'Browser client'); await pg.fill('#ot', '90000');
+  await pg.fill('#oph', '+1 646 555 0100'); await pg.fill('#oc', 'UI-1'); await pg.fill('#ocu', 'Browser client'); await pg.fill('#ot', '90000');
   await pg.setInputFiles('#pz input', { name: 'adv.png', mimeType: 'image/png', buffer: PNG });
   await pg.waitForFunction(() => document.getElementById('p_a') && document.getElementById('p_a').value === '5000', null, { timeout: 8000 });
   await pg.fill('#p_r', 'UITXN0001'); await pg.click('#nf button[type=submit]'); await pg.waitForSelector('text=Sent for approval');
@@ -129,6 +129,15 @@ fs.mkdirSync('/tmp/pcshots', { recursive: true });
   ok('clear asks to download the report first', /Download the report first/.test(await pg.textContent('.toast')));
   await pg.goto(base + '/#/audit'); await pg.waitForSelector('.tr:not(.h)');
   ok('audit log shows entries', (await pg.locator('.tr:not(.h)').count()) > 5);
+  await pg.close();
+
+  // ---- sales finds an order by phone number
+  pg = await newPage(390, 844); await login(pg, 'uploader');
+  await pg.goto(base + '/#/add'); await pg.waitForSelector('#f_ph');
+  await pg.fill('#f_ph', '646 555 0100'); await pg.waitForSelector('[data-pick]');
+  ok('typing the phone number lists the customer’s open order', (await pg.textContent('[data-pick]')).includes('UI-1'));
+  await pg.click('[data-pick]'); await pg.waitForFunction(() => /order total/.test(document.getElementById('ohint').textContent));
+  ok('tapping it fills the order ID and shows the client', await pg.inputValue('#f_o') === 'UI-1' && (await pg.textContent('#ohint')).includes('Browser client'));
   await pg.close();
 
   ok('no browser errors', errors.length === 0, errors.join(' | '));
