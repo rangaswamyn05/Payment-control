@@ -92,7 +92,7 @@ function shell(active, inner) {
   const items = [];
   if (mgr) items.push(['#/', 'Dashboard'], ['#/orders', 'Orders'], ['#/payments', 'Payments'], ['#/review', 'Review' + (S.badge ? `<span class="pill">${S.badge}</span>` : '')], ['#/statement', 'Statement']);
   if (!mgr) items.push(['#/new-order', 'New order', 'Start here for a new customer booking: phone number, order total and the first advance screenshot.']);
-  items.push(['#/add', 'Add payment', 'For a later instalment on an order that already exists.'], ['#/mine', mgr ? 'My entries' : 'My submissions'], ['#/inbox', 'Inbox' + (S.unread ? `<span class="pill">${S.unread}</span>` : '')]);
+  items.push(['#/add', 'Add payment', 'For a later instalment on an order that already exists.'], ['#/mine', mgr ? 'My entries' : 'My submissions', mgr ? 'Payments you entered yourself, with their status.' : 'The orders and payments you have sent in, with their status.'], ['#/inbox', 'Inbox' + (S.unread ? `<span class="pill">${S.unread}</span>` : ''), 'Updates for you: approvals, changes asked for and alerts.']);
   if (mgr) items.push(['#/audit', 'Audit log']);
   if (u.role === 'owner') items.push(['#/reports', 'Reports'], ['#/team', 'Team'], ['#/settings', 'Settings']);
   const nav = items.map(([h, t, hint]) => `<a href="${h}" class="${active === h ? 'on' : ''}"${hint ? ` data-tip="${hint}"` : ''}>${t}</a>`).join('');
