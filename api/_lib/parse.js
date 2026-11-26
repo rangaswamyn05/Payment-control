@@ -55,6 +55,12 @@ function findAmounts(text) {
     const mm = /^\s*\+?\s*([0-9][0-9,]*(?:\.\d{1,2})?)\s*$/.exec(l);
     if (mm && mm[1].replace(/[,.]/g, '').length <= 9) { const n = toNum(mm[1]); if (n > 0) out.push(n); }
   }
+  if (out.length) return out;
+  // the rupee sign is often read as a stray symbol or letter (% ¥ € Z = ?): accept that in front of a lone amount
+  for (const l of text.split(/\n/)) {
+    const mm = /^\s*[%¥€=?*zZ2]\s*([0-9][0-9,]*(?:\.\d{1,2})?)\s*$/.exec(l);
+    if (mm && mm[1].replace(/[,.]/g, '').length <= 9) { const n = toNum(mm[1]); if (n > 0) out.push(n); }
+  }
   return out;
 }
 

@@ -26,5 +26,6 @@ const { parseSchedule } = require('../api/_lib/parse');
 eq('schedule rows with dates and amounts', parseSchedule('Sr Due date Amount\n1 05/12/2026 ₹50,000\n2 20 Jan 2027 ₹50,000\n3 2027-03-01 Rs 25,000.00'), [{ date: '2026-12-05', amount: 50000 }, { date: '2027-01-20', amount: 50000 }, { date: '2027-03-01', amount: 25000 }]);
 eq('schedule read as separate columns', parseSchedule('Date\n05/12/2026\n20/01/2027\nAmount\n50,000\n60,000'), [{ date: '2026-12-05', amount: 50000 }, { date: '2027-01-20', amount: 60000 }]);
 eq('no schedule in plain text', parseSchedule('Thank you 1234'), []);
+eq('rupee sign read as a percent sign', parseUpi('Completed\n\n% 30,000\n\nTo: Ramesh Kumar\nNov 25, 2026, 2:11 PM\nUPI transaction ID\n632912345678').amount, 30000);
 console.log(bad ? bad + ' FAILED' : 'ALL PARSER TESTS PASSED');
 process.exit(bad ? 1 : 0);
