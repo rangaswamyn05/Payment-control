@@ -104,7 +104,7 @@ function viewLogin() {
   const demo = S.health && S.health.demo;
   const setup = S.health && S.health.needsSetup;
   return { html: `<div class="login"><div class="logo" style="width:48px;height:48px;border-radius:12px">${ICON.shield.replace('width="18" height="18"', 'width="28" height="28"')}</div><h1 style="margin-top:14px">Payment Control</h1><p class="muted" style="margin:4px 0 20px">Know that every payment reached the business.</p>
-  <form class="card" id="lf" autocomplete="on">${setup ? '<h2 style="margin-bottom:12px">Create the owner account</h2><div class="field"><label for="nm">Your name</label><input id="nm" class="in" autocomplete="name"></div>' : ''}
+  ${setup ? rolesCard() : ''}<form class="card" id="lf" autocomplete="on">${setup ? '<h2 style="margin-bottom:12px">Create the owner account</h2><div class="field"><label for="nm">Your name</label><input id="nm" class="in" autocomplete="name"></div>' : ''}
   <div class="field"><label for="un">Username</label><input id="un" class="in" autocomplete="username" autocapitalize="none" spellcheck="false"></div>
   <div class="field"><label for="pw">Password${setup ? ' <span class="opt">(at least 8 characters)</span>' : ''}</label><input id="pw" type="password" class="in" autocomplete="${setup ? 'new-password' : 'current-password'}"></div>
   <div class="err" id="lerr" style="min-height:18px;margin-bottom:6px"></div><button class="btn p" style="width:100%" type="submit">${setup ? 'Create account' : 'Sign in'}</button></form>
@@ -264,11 +264,20 @@ async function viewAudit() {
   return { active: '#/audit', html: `<div class="head"><div><h1>Audit log</h1><div class="muted">Every change, with who made it and when. Newest first.</div></div></div><div class="card"><div class="tbl"><div class="tr h" style="min-width:700px"><div class="c" style="flex:1.3">When</div><div class="c" style="flex:1.4">Who</div><div class="c" style="flex:1.4">Action</div><div class="c1">Details</div></div>${rows}</div></div>` };
 }
 
+// Who can do what. Shown on the Team page and on first-time setup.
+function rolesCard(compact) {
+  const r = (t, who, items) => `<div style="border-top:1px solid #EEF2F6;padding:12px 0"><b>${t}</b> <span class="muted" style="font-size:13px">${who}</span><ul style="margin:6px 0 0 18px;padding:0;font-size:14px;line-height:1.5">${items.map(x => `<li>${x}</li>`).join('')}</ul></div>`;
+  return `<div class="card" style="margin:0 0 16px;text-align:left"><h2 style="margin-bottom:4px">Who can do what</h2><div class="muted" style="font-size:13px">Three roles. Every payment is checked by the system or a second person, never only by the one who added it.</div>
+  ${r('Uploader', 'sales team', ['Creates orders and adds payments by dropping a screenshot.', 'Sees only their own orders and what is collected and outstanding.', 'Later payments need no approval. They are validated against the bank statement.'])}
+  ${r('Manager', 'finance or operations', ['Approves new orders (can correct the client name or total).', 'Verifies payments the system could not match, and reviews flagged ones.', 'Approves a payment plan that does not match the order. Cash, offline entries, large amounts and anything a manager enters go to the owner.'])}
+  ${r('Owner', 'business owner', ['Approves cash, offline entries and amounts above the limit.', 'Changes order totals and closes orders with an override.', 'Manages people, settings, reports and the audit log.'])}</div>`;
+}
+
 async function viewTeam() {
   const { users } = await api('GET', 'users');
   const rows = users.map(u => `<div class="tr" style="min-width:560px"><div class="c1"><b>${esc(u.name)}</b><div class="muted" style="font-size:13px">${esc(u.username)}</div></div><div class="c" style="text-transform:capitalize">${esc(u.role)}</div><div class="c">${u.active ? '<span class="badge good">Active</span>' : '<span class="badge">Disabled</span>'}</div><div class="c1" style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn s" data-act="userReset" data-id="${u.id}">Reset password</button>${u.id === S.user.id ? '' : `<button class="btn s ${u.active ? 'd' : ''}" data-act="userToggle" data-id="${u.id}" data-active="${u.active ? 1 : 0}">${u.active ? 'Disable' : 'Enable'}</button>`}</div></div>`).join('');
   return { active: '#/team', html: `<div class="head"><div><h1>Team</h1><div class="muted">Uploaders add payments. Managers see balances and confirm cash. Owners manage people and settings.</div></div></div>
-  <div class="grid2"><div class="card a"><div class="tbl"><div class="tr h" style="min-width:560px"><div class="c1">Person</div><div class="c">Role</div><div class="c">Status</div><div class="c1"></div></div>${rows}</div></div>
+  ${rolesCard()}<div class="grid2"><div class="card a"><div class="tbl"><div class="tr h" style="min-width:560px"><div class="c1">Person</div><div class="c">Role</div><div class="c">Status</div><div class="c1"></div></div>${rows}</div></div>
   <div class="card b"><h2 style="margin-bottom:12px">Add a person</h2><form id="uf"><div class="field"><label for="un1">Name</label><input id="un1" class="in" required></div><div class="field"><label for="uu">Username</label><input id="uu" class="in" autocapitalize="none" required></div><div class="field"><label for="up">Password <span class="opt">(at least 8 characters)</span></label><input id="up" type="password" class="in" autocomplete="new-password" required></div><div class="field"><label for="ur">Role</label><select id="ur" class="in"><option value="uploader">Uploader</option><option value="manager">Manager</option><option value="owner">Owner</option></select></div><div class="err" id="uerr" style="min-height:18px"></div><button class="btn p" type="submit">Add person</button></form></div></div>`,
     after() {
       document.getElementById('uf').addEventListener('submit', async e => {
