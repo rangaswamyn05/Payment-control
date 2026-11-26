@@ -113,7 +113,7 @@ function dueInfo(o, collected, outstanding) {
   if (!(outstanding > 0.005)) return null;
   let date = '', amount = outstanding;
   if (Array.isArray(o.schedule) && o.schedule.length) {
-    let cum = 0;
+    let cum = o.scheduleBase || 0;
     for (const r of o.schedule) { cum = r2(cum + r.amount); if (cum > collected + 0.005) { date = r.date; amount = r2(cum - collected); break; } }
   } else if (o.nextDue) date = o.nextDue;
   return date ? { date, amount, overdue: date < todayIST() } : null;
@@ -255,6 +255,9 @@ async function applyAdjust(me, o, r, settings) {
     await db.insert('payments', { orderCode: o.code, mode: 'cash', amount: r.amount, date: at.slice(0, 16), txnId: '', seq: 0, status: 'cash_confirmed', approval: '', note: 'Received offline (adjustment): ' + r.comment, adjust: true, createdBy: r.byId || me.id, createdByName: r.by || me.name });
     n = await db.update('orders', o.id, { status: 'closed', closedAt: at });
     await audit(me, 'adjust_close_offline', 'order', o.code, `${r.amount} offline. ${r.comment}`);
+  } else if (r.kind === 'change_plan') {
+    n = await db.update('orders', o.id, { schedule: r.schedule, scheduleBase: r.base || 0, nextDue: '', planImageId: r.planImageId || o.planImageId || '', modifications: [...(o.modifications || []), { field: 'payment plan', from: (o.schedule && o.schedule.length) ? 'earlier plan' : 'none', to: r.schedule.map(x => x.date + ' ' + inr(x.amount)).join(', '), by: me.name, at, comment: r.comment }] });
+    await audit(me, 'adjust_plan', 'order', o.code, r.comment);
   } else {
     n = await db.update('orders', o.id, { total: r.newTotal, modifications: [...(o.modifications || []), { field: 'total', from: o.total, to: r.newTotal, by: me.name, at, comment: r.comment }] });
     await audit(me, 'adjust_total', 'order', o.code, `${o.total} -> ${r.newTotal}. ${r.comment}`);
@@ -453,7 +456,7 @@ async function route(req, res) {
       const o = (await db.all('orders')).find(x => lc(x.code) === lc(c));
       if (!o) throw new HttpErr(404, 'No order with that ID');
       const n = (await db.all('payments')).filter(p => p.orderCode === o.code && p.status !== 'rejected').length;
-      return send(res, 200, { code: o.code, customer: o.customer, total: o.total, closed: o.status === 'closed', pending: o.status === 'pending', rejected: o.status === 'rejected', nextPayment: n + 1, hasPlan: !!(o.schedule && o.schedule.length) });
+      return send(res, 200, { code: o.code, customer: o.customer, total: o.total, closed: o.status === 'closed', pending: o.status === 'pending', rejected: o.status === 'rejected', nextPayment: n + 1, hasPlan: !!(o.schedule && o.schedule.length), outstanding: orderView(o, await db.all('payments')).outstanding });
     }
     if (b === 'by-phone' && c && m === 'GET') {
       await authed(req, url, 'uploader');
@@ -636,11 +639,31 @@ async function route(req, res) {
       if (order.status === 'rejected') throw new HttpErr(400, 'That order was sent back. Fix it and send it again first.');
       const v0 = orderView(order, await db.all('payments'));
       const hasPlan = !!(order.schedule && order.schedule.length);
-      if (!hasPlan && !body.nextDue && body.skipDue !== true && r2(order.total - v0.collected - r2(body.amount)) > 0.005) throw new HttpErr(400, 'Add the next payment due date', { needDue: true });
+      if (!hasPlan && !body.nextDue && body.skipDue !== true && !(Array.isArray(body.schedule) && body.schedule.length) && r2(order.total - v0.collected - r2(body.amount)) > 0.005) throw new HttpErr(400, 'Add the next payment due date', { needDue: true });
       const newDue = body.nextDue && !(order.schedule && order.schedule.length) && (order.createdById === me.id || RANK[me.role] >= RANK.manager) ? parseDue({ nextDue: body.nextDue }, order.total) : null;
       const { p, notice } = await addPayment(me, order, body);
       if (newDue) await db.update('orders', order.id, newDue);
-      return send(res, 200, { payment: { id: p.id, orderCode: p.orderCode, amount: p.amount, mode: p.mode, seq: p.seq, flagged: p.status === 'flagged', needsOwner: p.approval === 'pending_owner' }, notice });
+      let planNote = '';
+      if (Array.isArray(body.schedule) && body.schedule.length && !hasPlan) {
+        if (body.schedule.length > 24) throw new HttpErr(400, 'Up to 24 instalments');
+        const rows = body.schedule.map(r => ({ date: String((r && r.date) || ''), amount: r2(r && r.amount) }));
+        if (rows.some(r => !isDay(r.date) || !(r.amount > 0))) throw new HttpErr(400, 'Each instalment needs a date and an amount');
+        rows.sort((x, y) => x.date.localeCompare(y.date));
+        const base = r2(v0.collected + r2(body.amount)), outAfter = r2(order.total - base), sum = r2(rows.reduce((t, r) => t + r.amount, 0));
+        const planImageId = body.planImageId && (await db.get('images', body.planImageId)) ? String(body.planImageId) : '';
+        if (Math.abs(sum - outAfter) < 0.005) {
+          await applyAdjust(me, order, { kind: 'change_plan', schedule: rows, base, planImageId, comment: 'Payment plan added with a payment', byId: me.id, by: me.name }, await getSettings());
+          planNote = 'Payment plan saved.';
+        } else {
+          const reason = `Plan adds up to ${inr(sum)} but ${inr(outAfter)} is due on ${order.code}. Does not match the order setup.`;
+          const rq = await db.insert('requests', { orderCode: order.code, kind: 'change_plan', comment: reason, by: me.name, byId: me.id, status: 'pending', schedule: rows, base, planImageId, outstanding: outAfter, planTotal: sum });
+          await audit(me, 'plan_change_requested', 'order', order.code, reason);
+          await notify('role:owner', `${me.name} sent a payment plan for ${order.code} that does not match: ${reason}`, order.code);
+          await notify('role:manager', `${me.name} sent a payment plan for ${order.code} that does not match: ${reason}`, order.code);
+          planNote = 'The plan does not match what is due (' + inr(sum) + ' planned, ' + inr(outAfter) + ' due). It was sent to a manager or the owner to approve.';
+        }
+      }
+      return send(res, 200, { planNote, payment: { id: p.id, orderCode: p.orderCode, amount: p.amount, mode: p.mode, seq: p.seq, flagged: p.status === 'flagged', needsOwner: p.approval === 'pending_owner' }, notice: [notice, planNote].filter(Boolean).join(' ') });
     }
     const me = await authed(req, url, 'manager');
     const orders = await db.all('orders');
@@ -711,7 +734,7 @@ async function route(req, res) {
     if (!b && m === 'GET') return send(res, 200, { requests: (await db.all('requests')).filter(r => r.status === 'pending').reverse() });
     const r = await db.get('requests', b);
     if (!r || r.status !== 'pending') throw new HttpErr(404, 'Request not found');
-    if (me.role !== 'owner') throw new HttpErr(403, 'Only the owner can decide this');
+    if (me.role !== 'owner' && r.kind !== 'change_plan') throw new HttpErr(403, 'Only the owner can decide this');
     const o = (await db.all('orders')).find(x => x.code === r.orderCode);
     if (c === 'approve' && m === 'POST') {
       if (!o || o.status !== 'open') throw new HttpErr(400, 'That order is no longer open');

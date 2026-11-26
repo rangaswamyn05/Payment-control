@@ -92,18 +92,18 @@ const payBody = P => ({ mode: P.mode, amount: String(P.amount).replace(/,/g, '')
 
 // ---------- Add payment (sales) ----------
 function viewAdd() {
-  const A = S.add || (S.add = { P: newPay(), orderCode: '', info: null, orderErr: '', seq: '', seqReason: '', needReason: null, err: '', busy: false, done: null });
+  const A = S.add || (S.add = { dueMode: 'next', P: newPay(), orderCode: '', info: null, orderErr: '', seq: '', seqReason: '', needReason: null, err: '', busy: false, done: null });
   if (A.done) {
     const d = A.done;
     return { active: '#/add', html: `<div style="max-width:520px;margin:0 auto"><div class="card" style="text-align:center;padding:32px 20px"><div class="tick">✓</div><h2 style="font-size:20px">Payment ${d.seq} saved</h2><p>${inr(d.amount)} on <b>${esc(d.orderCode)}</b></p>${A.notice ? `<div class="note warn" style="margin:12px 0;text-align:left">${esc(A.notice)}</div>` : ''}${d.needsOwner && !A.notice ? '<div class="note" style="margin:12px 0">The owner will approve this entry.</div>' : ''}<button class="btn p" style="width:100%;margin-top:14px" data-act="addAnother">Add another payment</button></div></div>`, after() { DROP.cur = null; } };
   }
   const P = A.P, i = A.info;
   const opts = i ? Array.from({ length: Math.max(8, i.nextPayment + 3) }, (_, k) => k + 1).map(n => `<option value="${n}" ${String(A.seq || i.nextPayment) === String(n) ? 'selected' : ''}>Payment ${n}${n === i.nextPayment ? ' (next)' : ''}</option>`).join('') : '';
-  return { active: '#/add', html: `<div style="max-width:520px;margin:0 auto"><div class="head" style="margin-bottom:12px"><div><h1 style="font-size:24px">Add payment</h1><div class="muted" style="font-size:13px;margin-top:4px">For a later instalment on an order that already exists. New customer? Use New order.</div></div></div>
-  <div class="card" style="margin-bottom:14px"><div class="field"><label for="f_ph">Customer phone number <span class="opt">(finds their orders)</span></label><input id="f_ph" class="in" inputmode="tel" value="${esc(A.phone || '')}" autocomplete="off">${(A.byPhone || []).length ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">${A.byPhone.map(o => `<button type="button" class="btn s" data-pick="${esc(o.code)}">${esc(o.code)} · ${esc(o.customer)}</button>`).join('')}</div>` : A.phoneTried ? '<div class="muted" style="font-size:13px;margin-top:6px">No open orders for that number.</div>' : ''}</div><div class="field" style="margin:0"><label for="f_o">Order ID</label><input id="f_o" class="in" value="${esc(A.orderCode)}" autocapitalize="characters" autocomplete="off"><div id="ohint" class="${A.orderErr ? 'err' : 'ok'}" style="min-height:20px;margin-top:6px">${A.orderErr ? esc(A.orderErr) : i ? `${esc(i.customer)} · order total ${inr(i.total)}` : ''}</div></div>
+  return { active: '#/add', html: `<div style="max-width:680px;margin:0 auto"><div class="head" style="margin-bottom:12px"><div><h1 style="font-size:24px">Add payment</h1><div class="muted" style="font-size:13px;margin-top:4px">For a later instalment on an order that already exists. New customer? Use New order.</div></div></div>
+  <div class="card" style="margin-bottom:16px"><h2 style="margin-bottom:12px"><span class="stepn">1</span> Which order?</h2><div class="field"><label for="f_ph">Customer phone number <span class="opt">(finds their orders)</span></label><input id="f_ph" class="in" inputmode="tel" value="${esc(A.phone || '')}" autocomplete="off">${(A.byPhone || []).length ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">${A.byPhone.map(o => `<button type="button" class="btn s" data-pick="${esc(o.code)}">${esc(o.code)} · ${esc(o.customer)}</button>`).join('')}</div>` : A.phoneTried ? '<div class="muted" style="font-size:13px;margin-top:6px">No open orders for that number.</div>' : ''}</div><div class="field" style="margin:0"><label for="f_o">Order ID</label><input id="f_o" class="in" value="${esc(A.orderCode)}" autocapitalize="characters" autocomplete="off"><div id="ohint" class="${A.orderErr ? 'err' : 'ok'}" style="min-height:20px;margin-top:6px">${A.orderErr ? esc(A.orderErr) : i ? `${esc(i.customer)} · order total ${inr(i.total)}` : ''}</div></div>
   ${i && !A.orderErr ? `<div class="field" style="margin:8px 0 0"><label for="f_s">Which payment is this?</label><select id="f_s" class="in">${opts}</select></div>` : ''}
   ${A.needReason ? `<div class="field" style="margin:12px 0 0"><div class="note warn" style="margin-bottom:8px">This looks like payment ${A.needReason}, but you picked ${esc(A.seq)}. Write why, then save again.</div><input id="f_sr" class="in" placeholder="Reason" value="${esc(A.seqReason)}"></div>` : ''}</div>
-  <div class="card"><form id="af" novalidate>${payFields(P)}${i && !A.orderErr && !i.hasPlan ? `<div class="field"><label for="f_nd">Next payment due </label><input id="f_nd" type="date" class="in" value="${esc(A.nextDue || '')}"><label style="display:flex;gap:8px;align-items:center;margin-top:8px;font-weight:400"><input type="checkbox" id="f_sk" ${A.skipDue ? 'checked' : ''}> Skip, no date yet</label></div>` : ''}<div class="err" id="aerr" style="min-height:18px;margin-bottom:6px">${esc(A.err || P.err || '')}</div><button class="btn p" type="submit" style="width:100%;min-height:52px" ${A.busy || P.busy ? 'disabled' : ''}>${P.mode === 'cash' ? 'Submit for approval' : 'Submit for validation'}</button></form></div></div>`,
+  <form id="af" novalidate><div class="card" style="margin-bottom:16px"><h2 style="margin-bottom:12px"><span class="stepn">2</span> This payment</h2>${payFields(P)}</div>${i && !A.orderErr && !i.hasPlan ? `<div id="dueWrap" style="${(i.outstanding - (Number(String(P.amount).replace(/,/g, '')) || 0)) > 0.005 || !P.amount ? '' : 'display:none'}">${dueCard(A, 3, 'When will the customer pay the rest?', 'Only needed while a balance remains. If a plan does not match what is due, a manager or the owner approves it.')}</div>` : ''}<div class="err" id="aerr" style="min-height:18px;margin-bottom:6px">${esc(A.err || P.err || '')}</div><button class="btn p" type="submit" style="width:100%;min-height:54px;font-size:16px" ${A.busy || P.busy ? 'disabled' : ''}>${P.mode === 'cash' ? 'Submit for approval' : 'Submit for validation'}</button></form></div>`,
     after() {
       const redraw = () => render();
       wirePay(P, redraw);
@@ -132,21 +132,65 @@ function viewAdd() {
       });
       if (A.orderCode && !A.info && !A.orderErr) fo.dispatchEvent(new Event('input'));
       const fs = document.getElementById('f_s'); if (fs) fs.addEventListener('change', () => { A.seq = fs.value; A.needReason = null; });
-      const sk = document.getElementById('f_sk'); if (sk) sk.addEventListener('change', () => { A.skipDue = sk.checked; });
-      const nd = document.getElementById('f_nd'); if (nd) nd.addEventListener('input', () => { A.nextDue = nd.value; });
+      const numA = v => Number(String(v).replace(/,/g, '')) || 0;
+      if (document.getElementById('ond') || document.querySelector('[data-dmode]')) { const lf = wireDue(A, redraw, () => { const o = (A.info ? A.info.outstanding : 0) - numA(P.amount), sum = A.plan.reduce((t, r) => t + numA(r.amount), 0); return Math.abs(sum - o) < 0.005 ? 'Matches what is due: ' + inr(o) : 'Adds up to ' + inr(sum) + ' but ' + inr(Math.max(o, 0)) + ' is due. A manager or the owner will approve this.'; }); const am = document.getElementById('p_a'); const dw = document.getElementById('dueWrap'); const tog = () => { if (dw) dw.style.display = (!P.amount || A.info.outstanding - numA(P.amount) > 0.005) ? '' : 'none'; }; if (am) am.addEventListener('input', () => { lf(); tog(); }); }
       const fr = document.getElementById('f_sr'); if (fr) fr.addEventListener('input', () => { A.seqReason = fr.value; });
       document.getElementById('af').addEventListener('submit', async e => {
         e.preventDefault(); A.err = ''; P.err = '';
         if (!A.orderCode.trim() || !A.info) A.err = 'Enter a valid order ID.'; else A.err = payCheck(P);
         if (A.err) { document.getElementById('aerr').textContent = A.err; return; }
+        let planBody = {};
+        if (!A.info.hasPlan && A.info.outstanding - numA(P.amount) > 0.005) {
+          if (A.dueMode === 'skip') planBody = { skipDue: true };
+          else if (A.dueMode === 'next') { if (!A.nextDue) A.err = 'Pick the next payment date, or choose Skip.'; else planBody = { nextDue: A.nextDue }; }
+          else { const rows = A.plan.filter(r => r.date || r.amount); if (!rows.length) A.err = 'Upload the plan or type the dates and amounts, or choose another option.'; else if (rows.some(r => !r.date || !(numA(r.amount) > 0))) A.err = 'Each instalment needs a due date and an amount.'; else planBody = { schedule: rows.map(r => ({ date: r.date, amount: String(numA(r.amount)) })), planImageId: A.planImg || '' }; }
+          if (A.err) { document.getElementById('aerr').textContent = A.err; return; }
+        }
         A.busy = true; render();
         try {
-          const r = await api('POST', 'payments', { ...payBody(P), orderCode: A.orderCode.trim(), seq: A.seq || A.info.nextPayment, seqReason: A.seqReason, nextDue: A.nextDue || undefined, skipDue: A.skipDue || undefined });
-          A.notice = r.notice; A.done = r.payment; A.P = newPay(); A.info = null; A.orderCode = ''; A.seq = ''; A.seqReason = ''; A.needReason = null; A.nextDue = ''; A.skipDue = false;
+          const r = await api('POST', 'payments', { ...payBody(P), orderCode: A.orderCode.trim(), seq: A.seq || A.info.nextPayment, seqReason: A.seqReason, ...planBody });
+          A.notice = r.notice; A.done = r.payment; A.P = newPay(); A.info = null; A.orderCode = ''; A.seq = ''; A.seqReason = ''; A.needReason = null; A.nextDue = ''; A.dueMode = 'next'; A.plan = [{ date: '', amount: '' }]; A.planImg = ''; A.planMsg = '';
         } catch (ex) { if (ex.data && ex.data.needReason) { A.needReason = ex.data.expected; A.err = ''; } else A.err = ex.message; }
         A.busy = false; render();
       });
     } };
+}
+
+// ---------- "when will the customer pay the rest" picker (New order and Add payment) ----------
+// D holds: dueMode ('plan' | 'next' | 'skip'), nextDue, plan [{date, amount}], planImg, planMsg, planBusy
+function dueCard(D, step, title, hint) {
+  D.dueMode = D.dueMode || 'plan'; D.plan = D.plan && D.plan.length ? D.plan : [{ date: '', amount: '' }]; D.nextDue = D.nextDue || '';
+  const rows = D.plan.map((r, i) => `<div class="two field" style="align-items:end"><div><label>Due date</label><input type="date" class="in" data-pr="${i}:date" value="${esc(r.date)}"></div><div style="display:flex;gap:8px;align-items:end"><div style="flex:1"><label>Amount (₹)</label><input class="in" inputmode="decimal" data-pr="${i}:amount" value="${esc(r.amount)}"></div><button type="button" class="btn s" data-prm="${i}" aria-label="Remove this instalment">✕</button></div></div>`).join('');
+  const seg = (m, t, tip) => `<button type="button" class="${D.dueMode === m ? 'on' : ''}" data-dmode="${m}" title="${tip}">${t}</button>`;
+  return `<div class="card" style="margin-bottom:16px"><h2 style="margin-bottom:6px"><span class="stepn">${step}</span> ${esc(title)}</h2><div class="muted" style="font-size:13px;margin-bottom:10px">${esc(hint)}</div>
+  <div class="seg" role="group" aria-label="Payment plan" style="margin-bottom:12px">${seg('plan', 'I have a complete payment plan', 'Upload a picture of the plan, or type every date and amount')}${seg('next', 'I only know the next payment date', 'Just choose the date of the next payment')}${seg('skip', 'Skip', 'No reminder for this order')}</div>
+  ${D.dueMode === 'skip' ? '' : D.dueMode === 'plan' ? `<div class="muted" style="font-size:13px;margin-bottom:8px">Upload a picture of the quotation or Excel with the dates.</div><label class="btn" style="width:100%;text-align:center;cursor:pointer">${D.planBusy ? 'Reading the picture…' : D.planImg ? 'Choose a different picture' : 'Upload picture'}<input type="file" id="plf" accept="image/*" hidden></label>${D.planMsg ? `<div class="note" style="margin-top:10px">${esc(D.planMsg)}</div>` : ''}${D.planImg && !D.planBusy ? `<div style="margin-top:12px">${rows}<button type="button" class="btn s" data-padd>+ Add instalment</button><div class="muted" id="pleft" style="font-size:13px;margin-top:8px"></div></div>` : ''}` : `<div class="muted" style="font-size:13px;margin-bottom:8px">Choose the date of the next payment.</div><div class="field"><label for="ond">Next payment due</label><input id="ond" type="date" class="in" data-d="nextDue" value="${esc(D.nextDue)}"></div>`}</div>`;
+}
+function wireDue(D, redraw, leftText) {
+  const left = () => { const el = document.getElementById('pleft'); if (el) el.textContent = leftText(); };
+  left();
+  document.querySelectorAll('[data-dmode]').forEach(b => b.addEventListener('click', () => { D.dueMode = b.dataset.dmode; redraw(); }));
+  document.querySelectorAll('[data-pr]').forEach(el => el.addEventListener('input', () => { const [i, k] = el.dataset.pr.split(':'); D.plan[+i][k] = el.value; left(); }));
+  document.querySelectorAll('[data-prm]').forEach(b => b.addEventListener('click', () => { D.plan.splice(+b.dataset.prm, 1); redraw(); }));
+  const pa = document.querySelector('[data-padd]'); if (pa) pa.addEventListener('click', () => { D.plan.push({ date: '', amount: '' }); redraw(); });
+  document.querySelectorAll('[data-d]').forEach(el => el.addEventListener('input', () => { D[el.dataset.d] = el.value; }));
+  const plf = document.getElementById('plf');
+  if (plf) plf.addEventListener('change', async () => {
+    const file = plf.files && plf.files[0]; if (!file) return;
+    if (!file.type.startsWith('image/')) { toast('Please choose an image (a screenshot or photo).', true); return; }
+    D.planBusy = true; D.planMsg = ''; redraw();
+    try {
+      const url = await downscale(file);
+      const { id } = await api('POST', 'images', { dataUrl: url }); D.planImg = id;
+      const r = await ocrAny(id, url, 'plan');
+      if (!r.configured) D.planMsg = 'Automatic reading is off. Type each date and amount below.';
+      else if (r.error) D.planMsg = r.error;
+      else if (r.parsed && r.parsed.schedule && r.parsed.schedule.length) { D.plan = r.parsed.schedule.map(x => ({ date: x.date, amount: String(x.amount) })); D.planMsg = 'We read these rows. Please check each date and amount.'; }
+      else D.planMsg = 'We could not find dates and amounts in that image. Type them below.';
+    } catch (ex) { D.planMsg = ex.message || 'Could not use that image'; }
+    D.planBusy = false; redraw();
+  });
+  return left;
 }
 
 // ---------- New order (sales) ----------
@@ -156,10 +200,7 @@ async function viewNewOrder() {
   if (N.done) return { active: '#/new-order', html: `<div style="max-width:520px;margin:0 auto"><div class="card" style="text-align:center;padding:32px 20px"><div class="tick">✓</div><h2 style="font-size:20px">Sent for approval</h2><p><b>${esc(N.done.code)}</b> · ${esc(N.done.customer)}</p><p class="muted">A manager or the owner will approve it. You will see a note in your Inbox if anything changes.</p><button class="btn p" style="width:100%;margin-top:14px" data-act="anotherOrder">Create another order</button></div></div>`, after() { DROP.cur = null; } };
   const P = N.P, auto = settings.orderIdMode === 'auto';
   N.dueMode = N.dueMode || 'plan'; N.plan = N.plan && N.plan.length ? N.plan : [{ date: '', amount: '' }]; N.nextDue = N.nextDue || '';
-  const planRows = N.plan.map((r, i) => `<div class="two field" style="align-items:end"><div><label>Due date</label><input type="date" class="in" data-pr="${i}:date" value="${esc(r.date)}"></div><div style="display:flex;gap:8px;align-items:end"><div style="flex:1"><label>Amount (₹)</label><input class="in" inputmode="decimal" data-pr="${i}:amount" value="${esc(r.amount)}"></div><button type="button" class="btn s" data-prm="${i}" aria-label="Remove this instalment">✕</button></div></div>`).join('');
-  const planCard = `<div class="card" style="margin-bottom:16px"><h2 style="margin-bottom:6px"><span class="stepn">3</span> When will the customer pay the rest?</h2><div class="muted" style="font-size:13px;margin-bottom:10px">Pick one. We use it to remind you what to collect next.</div>
-  <div class="seg" role="group" aria-label="Payment plan" style="margin-bottom:12px"><button type="button" class="${N.dueMode === 'plan' ? 'on' : ''}" data-dmode="plan" title="Upload a picture of the plan, or type every date and amount">I have a complete payment plan</button><button type="button" class="${N.dueMode === 'next' ? 'on' : ''}" data-dmode="next" title="Just choose the date of the next payment">I only know the next payment date</button><button type="button" class="${N.dueMode === 'skip' ? 'on' : ''}" data-dmode="skip" title="No reminder for this order">Skip</button></div>
-  ${N.dueMode === 'skip' ? `` : N.dueMode === 'plan' ? `<div class="muted" style="font-size:13px;margin-bottom:8px">Upload a picture of the quotation or Excel with the dates.</div><label class="btn" style="width:100%;text-align:center;cursor:pointer">${N.planBusy ? 'Reading the picture…' : N.planImg ? 'Choose a different picture' : 'Upload picture'}<input type="file" id="plf" accept="image/*" hidden></label>${N.planMsg ? `<div class="note" style="margin-top:10px">${esc(N.planMsg)}</div>` : ''}${N.planImg && !N.planBusy ? `<div style="margin-top:12px">${planRows}<button type="button" class="btn s" data-padd>+ Add instalment</button><div class="muted" id="pleft" style="font-size:13px;margin-top:8px"></div></div>` : ''}` : `<div class="muted" style="font-size:13px;margin-bottom:8px">Choose the date of the next payment.</div><div class="field"><label for="ond">Next payment due</label><input id="ond" type="date" class="in" data-n="nextDue" value="${esc(N.nextDue)}"></div>`}</div>`;
+  const planCard = dueCard(N, 3, 'When will the customer pay the rest?', 'Pick one. We use it to remind you what to collect next.');
   const extras = (settings.customerFields || []).map(f => `<div class="field"><label for="x_${f.key}">${esc(f.label)}</label><input id="x_${f.key}" class="in" data-x="${f.key}" value="${esc(N.extra[f.key] || '')}"></div>`).join('');
   return { active: '#/new-order', html: `<div style="max-width:680px;margin:0 auto"><div class="head" style="margin-bottom:12px"><div><h1 style="font-size:24px">New order</h1><div class="muted" style="font-size:13px;margin-top:4px">Start here for a new customer booking: phone number, order total and the first advance screenshot.</div></div></div>
   <form id="nf" novalidate><div class="card" style="margin-bottom:16px"><h2 style="margin-bottom:12px"><span class="stepn">1</span> Customer and order</h2><div class="field"><label for="oph">Customer phone number</label><input id="oph" class="in" data-n="phone" inputmode="tel" value="${esc(N.phone)}" autocomplete="off">${(N.found || []).length && !N.skipFound ? `<div class="note warn" style="margin-top:10px"><b>This customer already has open orders.</b> Pick one to add a payment to it, or continue to create a new order.<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">${N.found.map(o => `<button type="button" class="btn s p" data-existing="${esc(o.code)}">${esc(o.code)} · ${esc(o.customer)}</button>`).join('')}<button type="button" class="btn s" data-newone>It's a new order</button></div></div>` : ''}</div><div class="two field">${auto ? '<div><label>Order ID</label><div class="muted" style="padding:12px 0">Created for you</div></div>' : `<div><label for="oc">Order ID</label><input id="oc" class="in" data-n="code" value="${esc(N.code)}" autocapitalize="characters" autocomplete="off"></div>`}<div><label for="ot">Total order value (₹)</label><input id="ot" class="in" data-n="total" inputmode="decimal" value="${esc(N.total)}"></div></div>
@@ -169,28 +210,8 @@ async function viewNewOrder() {
     after() {
       wirePay(P, () => render());
       const num = v => Number(String(v).replace(/,/g, '')) || 0;
-      const left = () => { const el = document.getElementById('pleft'); if (el) { const l = num(N.total) - N.plan.reduce((a, r) => a + num(r.amount), 0); el.textContent = num(N.total) > 0 ? (l >= 0 ? 'Left to schedule: ' + inr(l) : 'The instalments add up to ' + inr(-l) + ' more than the order total.') : 'Enter the order total to see how much is left to schedule.'; } };
-      left();
-      document.querySelectorAll('[data-dmode]').forEach(b => b.addEventListener('click', () => { N.dueMode = b.dataset.dmode; render(); }));
-      document.querySelectorAll('[data-pr]').forEach(el => el.addEventListener('input', () => { const [i, k] = el.dataset.pr.split(':'); N.plan[+i][k] = el.value; left(); }));
-      document.querySelectorAll('[data-prm]').forEach(b => b.addEventListener('click', () => { N.plan.splice(+b.dataset.prm, 1); render(); }));
-      const pa = document.querySelector('[data-padd]'); if (pa) pa.addEventListener('click', () => { N.plan.push({ date: '', amount: '' }); render(); });
+      const left = wireDue(N, () => render(), () => { const l = num(N.total) - N.plan.reduce((a, r) => a + num(r.amount), 0); return num(N.total) > 0 ? (l >= 0 ? 'Left to schedule: ' + inr(l) : 'The instalments add up to ' + inr(-l) + ' more than the order total.') : 'Enter the order total to see how much is left to schedule.'; });
       const totEl = document.querySelector('[data-n="total"]'); if (totEl) totEl.addEventListener('input', left);
-      const plf = document.getElementById('plf');
-      if (plf) plf.addEventListener('change', async () => {
-        const file = plf.files && plf.files[0]; if (!file) return;
-        if (!file.type.startsWith('image/')) { toast('Please choose an image (a screenshot or photo).', true); return; }
-        N.planBusy = true; N.planMsg = ''; render();
-        try {
-          const { id } = await api('POST', 'images', { dataUrl: await downscale(file) }); N.planImg = id;
-          const r = await ocrAny(id, await downscale(file), 'plan');
-          if (!r.configured) N.planMsg = 'Automatic reading is off. Type each date and amount below.';
-          else if (r.error) N.planMsg = r.error;
-          else if (r.parsed && r.parsed.schedule && r.parsed.schedule.length) { N.plan = r.parsed.schedule.map(x => ({ date: x.date, amount: String(x.amount) })); N.planMsg = 'We read these rows. Please check each date and amount.'; }
-          else N.planMsg = 'We could not find dates and amounts in that image. Type them below.';
-        } catch (ex) { N.planMsg = ex.message || 'Could not use that image'; }
-        N.planBusy = false; render();
-      });
       document.querySelectorAll('[data-n]').forEach(el => el.addEventListener('input', () => { N[el.dataset.n] = el.value; }));
       let ft; document.getElementById('oph').addEventListener('input', e => {
         clearTimeout(ft); N.skipFound = false;
@@ -303,13 +324,13 @@ async function viewReview() {
   const wait = all.filter(p => p.status === 'client_reported');
   const line = p => `<div style="border-top:1px solid #EEF2F6;padding:14px 0"><div style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px"><div><b>${inr(p.amount)}</b> · <a href="#/orders/${encodeURIComponent(p.orderCode)}" style="color:var(--acc);font-weight:600">${esc(p.orderCode)}</a> <span class="muted">${esc(p.customer || '')}</span><div class="muted" style="font-size:13px">${esc(MODE[p.mode] || p.mode)} · ${esc(fdate(p.date))} · by ${esc(p.createdByName || '')}${p.seqReason ? ' · out of order: ' + esc(p.seqReason) : ''}</div>${p.reason ? `<div class="err">${esc(REASON2[p.reason] || p.reason)}</div>` : ''}</div><div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-start">${payActions(p)}</div></div></div>`;
   const orderRow = o => `<div style="border-top:1px solid #EEF2F6;padding:14px 0;display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px"><div><b>${esc(o.code)}</b> · ${esc(o.customer)} · <b>${inr(o.total)}</b><div class="muted" style="font-size:13px">Created by ${esc(o.createdBy)}</div></div><button class="btn s p" data-act="reviewOrder" data-code="${esc(o.code)}">Review</button></div>`;
-  const reqRow = r => `<div style="border-top:1px solid #EEF2F6;padding:14px 0;display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px"><div><b>${esc(r.orderCode)}</b> · ${r.kind === 'close_offline' ? `close with ${inr(r.amount)} received offline` : `change total ${inr(r.oldTotal)} to ${inr(r.newTotal)}`}<div class="muted" style="font-size:13px">${esc(r.by)}: ${esc(r.comment)}</div></div>${owner ? `<div style="display:flex;gap:6px"><button class="btn s p" data-act="reqApprove" data-id="${r.id}">Approve</button><button class="btn s d" data-act="reqReject" data-id="${r.id}">Decline</button></div>` : '<span class="muted">Waiting for the owner</span>'}</div>`;
+  const reqRow = r => `<div style="border-top:1px solid #EEF2F6;padding:14px 0;display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px"><div><b>${esc(r.orderCode)}</b> · ${r.kind === 'close_offline' ? `close with ${inr(r.amount)} received offline` : r.kind === 'change_plan' ? `payment plan: ${(r.schedule || []).map(x => fdate(x.date) + ' ' + inr(x.amount)).join(', ')}` : `change total ${inr(r.oldTotal)} to ${inr(r.newTotal)}`}<div class="muted" style="font-size:13px">${esc(r.by)}: ${esc(r.comment)}</div></div>${owner || r.kind === 'change_plan' ? `<div style="display:flex;gap:6px"><button class="btn s p" data-act="reqApprove" data-id="${r.id}">Approve</button><button class="btn s d" data-act="reqReject" data-id="${r.id}">Decline</button></div>` : '<span class="muted">Waiting for the owner</span>'}</div>`;
   S.badge = flags.length + waitOwner.length + toApprove.length + requests.length;
   const sec = (t, n, sub, body, w) => `<div class="card a" style="flex-basis:${w || 480}px"><h2>${t} <span class="muted" style="font-weight:500">· ${n}</span></h2><div class="muted" style="font-size:13px;margin-bottom:6px">${sub}</div>${body || '<p class="muted">Nothing here.</p>'}</div>`;
   return { active: '#/review', html: `<div class="head"><div><h1>Needs your review</h1><div class="muted">New orders, owner approvals and anything unusual.</div></div></div>
   ${toApprove.length ? `<div class="card a" style="margin-bottom:16px"><h2>Orders to approve <span class="muted" style="font-weight:500">· ${toApprove.length}</span></h2><div class="muted" style="font-size:13px;margin-bottom:6px">Created by the sales team. Approve, change and approve, or send back.</div>${toApprove.map(orderRow).join('')}</div>` : ''}
   <div class="grid2">${sec('Waiting for the owner', waitOwner.length, owner ? 'Cash, entries over the limit and entries by managers.' : 'Cash, entries over the limit and entries by managers. Only the owner can approve these.', waitOwner.map(line).join(''))}
-  ${sec('Changes to outstanding', requests.length, 'A manager asked to close an order or change its total.', requests.map(reqRow).join(''))}</div>
+  ${sec('Changes to outstanding', requests.length, 'Requests to close an order, change its total, or approve a payment plan that does not match.', requests.map(reqRow).join(''))}</div>
   <div class="grid2" style="margin-top:16px">${sec('Flagged', flags.length, 'Possible duplicates and payments above the order total.', flags.map(line).join(''))}
   ${sec('Validation pending', wait.length, `Best way to clear these: <a href="#/statement" style="color:var(--acc);font-weight:600">drop a bank statement</a>. These are not wrong, just not checked yet.`, wait.map(line).join(''))}</div>` };
 }

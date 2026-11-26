@@ -204,6 +204,20 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
   r2_ = await call('GET', 'orders/mine', null, up); const po = (r2_.j.orders || []).find(o => o.code === 'plan-1'); ok('own orders show the next instalment due, soonest first', po && po.due && po.due.date === '2030-02-01' && po.due.amount === 45000 && po.due.overdue === false, JSON.stringify(po));
   r = await call('POST', 'orders', { phone: P(), code: 'plan-skip', customer: 'x', total: 100000, firstPayment: fp('skip1', 5000), noDue: true, skipDue: true }, up); ok('skipping the plan is allowed', r.s === 200 || r.s === 201);
   }
+  { // plan added with a payment: matching goes straight in, a mismatch needs approval
+    const imgP = (await call('POST', 'images', { dataUrl: PNG }, up)).j.id;
+    const mk = async (code, n) => { const r0 = await call('POST', 'orders', { phone: P(), code, customer: 'x', total: 100000, firstPayment: { mode: 'upi', amount: '20000', date: '2026-11-25T10:00', txnId: 'MM' + n, imageId: imgP }, skipDue: true, noDue: true }, up); return r0; };
+    let r0 = await mk('mm-1', 'A1'); ok('order with plan skipped is created', r0.s === 200, JSON.stringify(r0.j));
+    r0 = await call('POST', 'orders/mm-1/approve', {}, ow); ok('owner approves it', r0.s === 200, JSON.stringify(r0.j));
+    r0 = await call('POST', 'payments', { mode: 'upi', amount: '20000', date: '2026-11-25T11:00', txnId: 'MM-A2', imageId: imgP, orderCode: 'mm-1', schedule: [{ date: '2030-05-01', amount: 40000 }, { date: '2030-06-01', amount: 20000 }], noDue: true }, up);
+    ok('matching plan with a payment is saved at once', r0.s === 200 && /Payment plan saved/.test(r0.j.notice || ''), JSON.stringify(r0.j));
+    r0 = await call('GET', 'orders/mine', null, up); const mo = (r0.j.orders || []).find(o => o.code === 'mm-1'); ok('next due follows the new plan', mo && mo.due && mo.due.date === '2030-05-01' && mo.due.amount === 40000, JSON.stringify(mo));
+    r0 = await mk('mm-2', 'B1'); r0 = await call('POST', 'orders/mm-2/approve', {}, ow);
+    r0 = await call('POST', 'payments', { mode: 'upi', amount: '20000', date: '2026-11-25T11:00', txnId: 'MM-B2', imageId: imgP, orderCode: 'mm-2', schedule: [{ date: '2030-05-01', amount: 30000 }], noDue: true }, up);
+    ok('plan that does not match is sent for approval', r0.s === 200 && /does not match/.test(r0.j.notice || ''), JSON.stringify(r0.j));
+    r0 = await call('GET', 'requests', null, ow); const rq = (r0.j.requests || []).find(x => x.orderCode === 'mm-2' && x.kind === 'change_plan'); ok('request is listed for the manager', !!rq);
+    r0 = await call('POST', 'requests/' + rq.id + '/approve', {}, mg); ok('manager can approve a plan change', r0.s === 200, JSON.stringify(r0.j));
+  }
   console.log(bad ? '\n' + bad + ' FAILED' : '\nALL API TESTS PASSED');
   srv.close(); mock.close(); process.exit(bad ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
