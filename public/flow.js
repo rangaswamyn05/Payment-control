@@ -28,18 +28,18 @@ window.addEventListener('hashchange', () => { DROP.cur = null; });
 // ---------- the payment capture block (used by New order and Add payment) ----------
 function newPay() {
   const t = new Date(), p = n => String(n).padStart(2, '0');
-  return { mode: 'upi', imageId: '', preview: '', amount: '', date: `${t.getFullYear()}-${p(t.getMonth() + 1)}-${p(t.getDate())}`, time: '', txnId: '', payer: '', payee: '', ocr: '', ocrMsg: '', busy: false };
+  return { mode: 'upi', imageId: '', preview: '', amount: '', date: '', today: `${t.getFullYear()}-${p(t.getMonth() + 1)}-${p(t.getDate())}`, time: '', txnId: '', payer: '', payee: '', ocr: '', ocrMsg: '', busy: false };
 }
 function payFields(P) {
   const cash = P.mode === 'cash';
   return `<div class="seg" role="group" aria-label="Payment mode" style="margin-bottom:14px">${['upi', 'transfer', 'cash'].map(m => `<button type="button" class="${P.mode === m ? 'on' : ''}" data-pmode="${m}">${m === 'upi' ? 'UPI' : m === 'transfer' ? 'Bank transfer' : 'Cash'}</button>`).join('')}</div>
   ${cash ? '<div class="note warn" style="margin-bottom:14px">Cash is approved by the owner before it counts as confirmed.</div>' : `${P.preview ? `<div class="card" style="padding:12px;display:flex;gap:12px;align-items:center;margin-bottom:14px"><img class="thumb" alt="Your screenshot" src="${P.preview}"><div style="flex:1"><b>${P.busy ? 'Reading the screenshot…' : 'Screenshot added'}</b><div class="muted" style="font-size:13px">${esc(P.ocrMsg || '')}</div></div><button type="button" class="btn s" data-pclear>Replace</button></div>` : dropZone('pz', 'Drop the payment screenshot here')}`}
-  <div class="two field"><div><label for="p_a">Amount (₹)</label><input id="p_a" class="in" data-p="amount" inputmode="decimal" value="${esc(P.amount)}"></div><div><label for="p_d">Date</label><input id="p_d" type="date" class="in" data-p="date" value="${esc(P.date)}"></div></div>
+  <div class="two field"><div><label for="p_a">Amount (₹)</label><input id="p_a" class="in" data-p="amount" inputmode="decimal" value="${esc(P.amount)}"></div><div><label for="p_d">Date <span class="opt">(from the screenshot)</span></label><input id="p_d" type="date" class="in" data-p="date" value="${esc(P.date)}"></div></div>
   ${cash ? '' : `<div class="two field"><div><label for="p_r">Transaction ID <span class="opt">(required)</span></label><input id="p_r" class="in" data-p="txnId" value="${esc(P.txnId)}" autocomplete="off"></div><div><label for="p_t">Time <span class="opt">(if shown)</span></label><input id="p_t" type="time" class="in" data-p="time" value="${esc(P.time)}"></div></div>`}`;
 }
 function wirePay(P, redraw) {
   document.querySelectorAll('[data-p]').forEach(el => el.addEventListener('input', () => { P[el.dataset.p] = el.value; }));
-  document.querySelectorAll('[data-pmode]').forEach(b => b.addEventListener('click', () => { P.mode = b.dataset.pmode; redraw(); }));
+  document.querySelectorAll('[data-pmode]').forEach(b => b.addEventListener('click', () => { P.mode = b.dataset.pmode; if (P.mode === 'cash' && !P.date) P.date = P.today; redraw(); }));
   const c = document.querySelector('[data-pclear]'); if (c) c.addEventListener('click', () => { P.imageId = ''; P.preview = ''; P.ocrMsg = ''; redraw(); });
   const onFile = f => readShot(P, f, redraw);
   if (document.getElementById('pz')) wireDrop('pz', onFile); else DROP.cur = onFile;
@@ -73,7 +73,7 @@ async function readShot(P, file, redraw) {
 }
 function payCheck(P) {
   if (!(Number(String(P.amount).replace(/,/g, '')) > 0)) return 'Enter the amount.';
-  if (!P.date) return 'Enter the payment date.';
+  if (!P.date) return P.mode === 'cash' ? 'Enter the payment date.' : 'Enter the date shown on the screenshot.';
   if (P.mode !== 'cash' && !P.imageId) return 'Add the payment screenshot.';
   if (P.mode !== 'cash' && !String(P.txnId).trim()) return 'No transaction ID. Type it from the screenshot, or use a screenshot that shows it.';
   return '';
