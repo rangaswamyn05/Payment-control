@@ -44,6 +44,17 @@ function wirePay(P, redraw) {
   const onFile = f => readShot(P, f, redraw);
   if (document.getElementById('pz')) wireDrop('pz', onFile); else DROP.cur = onFile;
 }
+// Reads the words in a picture inside the browser (free, no key). Used when the server has no Vision key.
+async function browserRead(dataUrl) {
+  if (!window.Tesseract) await new Promise((ok, no) => { const sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js'; sc.onload = ok; sc.onerror = () => no(new Error('reader not loaded')); document.head.appendChild(sc); });
+  const r = await window.Tesseract.recognize(dataUrl, 'eng');
+  return (r && r.data && r.data.text) || '';
+}
+async function ocrAny(imageId, dataUrl, kind) {
+  const r = await api('POST', 'ocr', { imageId, kind });
+  if (r.configured) return r;
+  try { const text = await browserRead(dataUrl); if (text.trim()) return await api('POST', 'ocr', { text, kind }); return { configured: true, error: 'No text found in the image. Type the details.' }; } catch (e) { return r; }
+}
 async function downscale(file, max = 2000, q = 0.85) {
   const bmp = await createImageBitmap(file); const k = Math.min(1, max / Math.max(bmp.width, bmp.height));
   const c = document.createElement('canvas'); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
@@ -55,7 +66,7 @@ async function readShot(P, file, redraw) {
   try {
     P.preview = await downscale(file); redraw();
     const { id } = await api('POST', 'images', { dataUrl: P.preview }); P.imageId = id;
-    const r = await api('POST', 'ocr', { imageId: id });
+    const r = await ocrAny(id, P.preview);
     if (!r.configured) P.ocrMsg = 'Automatic reading is off. Type the amount and transaction ID.';
     else if (r.error) P.ocrMsg = r.error;
     else {
@@ -171,7 +182,7 @@ async function viewNewOrder() {
         N.planBusy = true; N.planMsg = ''; render();
         try {
           const { id } = await api('POST', 'images', { dataUrl: await downscale(file) }); N.planImg = id;
-          const r = await api('POST', 'ocr', { imageId: id, kind: 'plan' });
+          const r = await ocrAny(id, await downscale(file), 'plan');
           if (!r.configured) N.planMsg = 'Automatic reading is off. Type each date and amount below.';
           else if (r.error) N.planMsg = r.error;
           else if (r.parsed && r.parsed.schedule && r.parsed.schedule.length) { N.plan = r.parsed.schedule.map(x => ({ date: x.date, amount: String(x.amount) })); N.planMsg = 'We read these rows. Please check each date and amount.'; }

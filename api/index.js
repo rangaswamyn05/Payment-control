@@ -426,6 +426,10 @@ async function route(req, res) {
   if (a === 'ocr' && m === 'POST') {
     const me = await authed(req, url, 'uploader');
     const body = await readBody(req);
+    if (typeof body.text === 'string' && body.text.trim()) { // text already read in the browser (no key needed)
+      const t = body.text.slice(0, 20000);
+      return send(res, 200, { configured: true, parsed: body.kind === 'plan' ? { schedule: parseSchedule(t) } : parseUpi(t) });
+    }
     const img = await db.get('images', body.imageId);
     if (!img || (RANK[me.role] < RANK.manager && img.createdBy !== me.id)) throw new HttpErr(404, 'Image not found');
     if (!process.env.GOOGLE_VISION_KEY) return send(res, 200, { configured: false });
