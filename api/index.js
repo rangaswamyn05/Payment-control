@@ -8,7 +8,7 @@ const { dispatch, dispatchOrder, validateUrl } = require('./_lib/connectors');
 const RANK = { uploader: 1, manager: 2, owner: 3 };
 const VERIFIED = ['verified', 'cash_confirmed'];
 const UNVERIFIED = ['client_reported', 'cash_pending'];
-const MODES = ['upi', 'transfer', 'cash'];
+const MODES = ['upi', 'transfer', 'cheque', 'cash'];
 const r2 = n => Math.round(Number(n) * 100) / 100;
 const lc = s => String(s || '').trim().toLowerCase();
 
@@ -160,7 +160,7 @@ async function runConnectors(event, payment, order, me) {
 async function addPayment(me, order, body, opts = {}) {
   const settings = await getSettings();
   const mode = lc(body.mode);
-  if (!MODES.includes(mode)) throw new HttpErr(400, 'Choose UPI, bank transfer or cash');
+  if (!MODES.includes(mode)) throw new HttpErr(400, 'Choose UPI, bank transfer, cheque or cash');
   const amount = r2(body.amount);
   if (!(amount > 0) || amount > 1e9) throw new HttpErr(400, 'Enter the amount');
   const date = normDate(body.date);
@@ -169,7 +169,7 @@ async function addPayment(me, order, body, opts = {}) {
   const txnId = String(body.txnId || '').trim().slice(0, 40);
   const isMgr = RANK[me.role] >= RANK.manager;
   if (mode !== 'cash') {
-    if (!txnId) throw new HttpErr(400, 'No transaction ID found. Add a screenshot that shows the transaction ID, or type it in.', { needTxn: true });
+    if (!txnId) throw new HttpErr(400, (mode === 'cheque' ? 'No cheque number. Add a photo that shows the cheque number, or type it in.' : 'No transaction ID found. Add a screenshot that shows the transaction ID, or type it in.'), { needTxn: true });
     if (!body.imageId && !isMgr) throw new HttpErr(400, 'Attach the payment screenshot');
   }
   if (body.imageId && !(await db.get('images', body.imageId))) throw new HttpErr(400, 'Screenshot not found, please attach it again');

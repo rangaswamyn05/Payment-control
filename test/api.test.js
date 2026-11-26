@@ -50,6 +50,8 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
   r = await call('POST', 'payments', base1, up); ok('uploader adds payment 1 (next number picked)', r.s === 200 && r.j.payment.seq === 1 && !r.j.payment.needsOwner);
   ok('payment event sent to business API with idempotency key', got.length === 2 && got[1].b.order_id === 'DEMO-1001' && got[1].b.amount === 30000 && /:created$/.test(got[1].h['x-idempotency-key']));
   r = await call('POST', 'payments', base1, up); ok('same transaction id refused as duplicate', r.s === 409 && r.j.duplicate === true);
+  r = await call('POST', 'payments', { ...base1, mode: 'cheque', txnId: '' }, up); ok('cheque without a cheque number is rejected', r.s === 400 && r.j.needTxn === true);
+  r = await call('POST', 'payments', { ...base1, mode: 'cheque' }, up); ok('cheque number already recorded is refused as duplicate', r.s === 409 && r.j.duplicate === true);
   const p2 = { orderCode: 'DEMO-1001', mode: 'transfer', amount: 5000, date: '2026-11-25T14:11', txnId: 'NEFT0002', imageId: img };
   r = await call('POST', 'payments', { ...p2, seq: 4 }, up); ok('wrong payment number asks for a reason', r.s === 409 && r.j.needReason === true && r.j.expected === 2);
   r = await call('POST', 'payments', { ...p2, seq: 4, seqReason: 'Third and fourth were paid in cash' }, up); ok('out-of-order number accepted with a reason, no manager step', r.s === 200 && r.j.payment.seq === 4 && !r.j.payment.needsOwner);

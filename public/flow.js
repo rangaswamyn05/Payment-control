@@ -32,9 +32,9 @@ function newPay() {
 }
 function payFields(P) {
   const cash = P.mode === 'cash';
-  return `<div class="seg" role="group" aria-label="Payment mode" style="margin-bottom:14px">${['upi', 'transfer', 'cash'].map(m => `<button type="button" class="${P.mode === m ? 'on' : ''}" data-pmode="${m}">${m === 'upi' ? 'UPI' : m === 'transfer' ? 'Bank transfer' : 'Cash'}</button>`).join('')}</div>
+  return `<div class="seg" role="group" aria-label="Payment mode" style="margin-bottom:14px">${['upi', 'transfer', 'cheque', 'cash'].map(m => `<button type="button" class="${P.mode === m ? 'on' : ''}" data-pmode="${m}">${m === 'upi' ? 'UPI' : m === 'transfer' ? 'Bank transfer' : m === 'cheque' ? 'Cheque' : 'Cash'}</button>`).join('')}</div>
   ${cash ? '<div class="note warn" style="margin-bottom:14px">Cash is approved by the owner before it counts as confirmed.</div>' : `${P.preview ? `<div class="card" style="padding:12px;display:flex;gap:12px;align-items:center;margin-bottom:14px"><img class="thumb" alt="Your screenshot" src="${P.preview}"><div style="flex:1"><b>${P.busy ? 'Reading the screenshot…' : 'Screenshot added'}</b><div class="muted" style="font-size:13px">${esc(P.ocrMsg || '')}</div></div><button type="button" class="btn s" data-pclear>Replace</button></div>` : dropZone('pz', 'Drop the payment screenshot here')}`}
-  <div class="two field"><div><label for="p_a">Amount (₹)</label><input id="p_a" class="in" data-p="amount" inputmode="decimal" value="${esc(P.amount)}"></div>${cash ? '' : `<div><label for="p_r">Transaction ID <span class="opt">(required)</span></label><input id="p_r" class="in" data-p="txnId" value="${esc(P.txnId)}" autocomplete="off"></div>`}</div>
+  <div class="two field"><div><label for="p_a">Amount (₹)</label><input id="p_a" class="in" data-p="amount" inputmode="decimal" value="${esc(P.amount)}"></div>${cash ? '' : `<div><label for="p_r">${P.mode === 'cheque' ? 'Cheque number' : 'Transaction ID'} <span class="opt">(required)</span></label><input id="p_r" class="in" data-p="txnId" value="${esc(P.txnId)}" autocomplete="off"></div>`}</div>
   <div class="muted" style="font-size:13px;margin-bottom:6px">Date: ${esc(P.date || P.today)} ${P.date ? '(read from the screenshot)' : '(today; the screenshot date is used when it can be read)'}</div>`;
 }
 function wirePay(P, redraw) {
@@ -74,7 +74,7 @@ async function readShot(P, file, redraw) {
 function payCheck(P) {
   if (!(Number(String(P.amount).replace(/,/g, '')) > 0)) return 'Enter the amount.';
     if (P.mode !== 'cash' && !P.imageId) return 'Add the payment screenshot.';
-  if (P.mode !== 'cash' && !String(P.txnId).trim()) return 'No transaction ID. Type it from the screenshot, or use a screenshot that shows it.';
+  if (P.mode !== 'cash' && !String(P.txnId).trim()) return (P.mode === 'cheque' ? 'No cheque number. Type it from the photo, or use a photo that shows it.' : 'No transaction ID. Type it from the screenshot, or use a screenshot that shows it.');
   return '';
 }
 const payBody = P => ({ mode: P.mode, amount: String(P.amount).replace(/,/g, ''), date: (P.date || P.today) + (P.date && P.time ? 'T' + P.time : ''), txnId: P.txnId, payer: P.payer, payee: P.payee, imageId: P.imageId, ocr: P.ocr });
