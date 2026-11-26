@@ -120,6 +120,7 @@ function viewAdd() {
           const keep = document.activeElement && document.activeElement.id === 'f_o'; render().then(() => { if (keep) { const e2 = document.getElementById('f_o'); if (e2) { e2.focus(); e2.setSelectionRange(e2.value.length, e2.value.length); } } });
         }, 350);
       });
+      if (A.orderCode && !A.info && !A.orderErr) fo.dispatchEvent(new Event('input'));
       const fs = document.getElementById('f_s'); if (fs) fs.addEventListener('change', () => { A.seq = fs.value; A.needReason = null; });
       const fr = document.getElementById('f_sr'); if (fr) fr.addEventListener('input', () => { A.seqReason = fr.value; });
       document.getElementById('af').addEventListener('submit', async e => {
@@ -144,12 +145,22 @@ async function viewNewOrder() {
   const P = N.P, auto = settings.orderIdMode === 'auto';
   const extras = (settings.customerFields || []).map(f => `<div class="field"><label for="x_${f.key}">${esc(f.label)}</label><input id="x_${f.key}" class="in" data-x="${f.key}" value="${esc(N.extra[f.key] || '')}"></div>`).join('');
   return { active: '#/new-order', html: `<div style="max-width:520px;margin:0 auto"><div class="head" style="margin-bottom:12px"><h1 style="font-size:24px">New order</h1></div>
-  <form id="nf" novalidate><div class="card" style="margin-bottom:14px"><div class="field"><label for="oph">Customer phone number</label><input id="oph" class="in" data-n="phone" inputmode="tel" value="${esc(N.phone)}" autocomplete="off"></div><div class="two field">${auto ? '<div><label>Order ID</label><div class="muted" style="padding:12px 0">Created for you</div></div>' : `<div><label for="oc">Order ID</label><input id="oc" class="in" data-n="code" value="${esc(N.code)}" autocapitalize="characters" autocomplete="off"></div>`}<div><label for="ot">Total order value (₹)</label><input id="ot" class="in" data-n="total" inputmode="decimal" value="${esc(N.total)}"></div></div>
+  <form id="nf" novalidate><div class="card" style="margin-bottom:14px"><div class="field"><label for="oph">Customer phone number</label><input id="oph" class="in" data-n="phone" inputmode="tel" value="${esc(N.phone)}" autocomplete="off">${(N.found || []).length && !N.skipFound ? `<div class="note warn" style="margin-top:10px"><b>This customer already has open orders.</b> Pick one to add a payment to it, or continue to create a new order.<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">${N.found.map(o => `<button type="button" class="btn s p" data-existing="${esc(o.code)}">${esc(o.code)} · ${esc(o.customer)}</button>`).join('')}<button type="button" class="btn s" data-newone>It's a new order</button></div></div>` : ''}</div><div class="two field">${auto ? '<div><label>Order ID</label><div class="muted" style="padding:12px 0">Created for you</div></div>' : `<div><label for="oc">Order ID</label><input id="oc" class="in" data-n="code" value="${esc(N.code)}" autocapitalize="characters" autocomplete="off"></div>`}<div><label for="ot">Total order value (₹)</label><input id="ot" class="in" data-n="total" inputmode="decimal" value="${esc(N.total)}"></div></div>
   <div class="field"><label for="ocu">Client name</label><input id="ocu" class="in" data-n="customer" value="${esc(N.customer)}"></div>${extras}</div>
   <div class="card"><h2 style="margin-bottom:10px">First advance payment</h2>${payFields(P)}<div class="err" id="nerr" style="min-height:18px;margin-bottom:6px">${esc(N.err || P.err || '')}</div><button class="btn p" type="submit" style="width:100%;min-height:52px" ${N.busy || P.busy ? 'disabled' : ''}>Send for approval</button></div></form></div>`,
     after() {
       wirePay(P, () => render());
       document.querySelectorAll('[data-n]').forEach(el => el.addEventListener('input', () => { N[el.dataset.n] = el.value; }));
+      let ft; document.getElementById('oph').addEventListener('input', e => {
+        clearTimeout(ft); N.skipFound = false;
+        ft = setTimeout(async () => {
+          if (N.phone.replace(/\D/g, '').length < 7) { if ((N.found || []).length) { N.found = []; render(); } return; }
+          try { N.found = (await api('GET', 'orders/by-phone/' + encodeURIComponent(N.phone))).orders; } catch (er) { N.found = []; }
+          if (N.found.length) render().then(() => { const e2 = document.getElementById('oph'); if (e2) { e2.focus(); e2.setSelectionRange(e2.value.length, e2.value.length); } });
+        }, 400);
+      });
+      document.querySelectorAll('[data-existing]').forEach(b => b.addEventListener('click', () => { S.add = { P: N.P, orderCode: b.dataset.existing, info: null, orderErr: '', seq: '', seqReason: '', needReason: null, err: '', busy: false, done: null, phone: '', byPhone: [] }; S.newOrder = null; go('#/add'); }));
+      const nw = document.querySelector('[data-newone]'); if (nw) nw.addEventListener('click', () => { N.skipFound = true; render(); });
       document.querySelectorAll('[data-x]').forEach(el => el.addEventListener('input', () => { N.extra[el.dataset.x] = el.value; }));
       document.getElementById('nf').addEventListener('submit', async e => {
         e.preventDefault(); N.err = ''; P.err = '';

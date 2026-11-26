@@ -140,6 +140,17 @@ fs.mkdirSync('/tmp/pcshots', { recursive: true });
   ok('tapping it fills the order ID and shows the client', await pg.inputValue('#f_o') === 'UI-1' && (await pg.textContent('#ohint')).includes('Browser client'));
   await pg.close();
 
+  // ---- new order for a customer who already has one: pick the existing order instead
+  pg = await newPage(390, 844); await login(pg, 'uploader');
+  await pg.goto(base + '/#/new-order'); await pg.waitForSelector('#oph');
+  await pg.fill('#oph', '646-555-0100'); await pg.waitForSelector('[data-existing]');
+  ok('a known phone number offers the customer’s existing orders', (await pg.textContent('[data-existing]')).includes('UI-1'));
+  await pg.click('[data-existing]'); await pg.waitForSelector('#f_s');
+  ok('choosing one goes to Add payment for that order (a later payment, not a new order)', pg.url().endsWith('#/add') && await pg.inputValue('#f_o') === 'UI-1');
+  await pg.goto(base + '/#/new-order'); await pg.waitForSelector('#oph'); await pg.fill('#oph', '646-555-0100'); await pg.waitForSelector('[data-newone]'); await pg.click('[data-newone]'); await pg.waitForFunction(() => !document.querySelector('[data-existing]'));
+  ok('"It\'s a new order" skips the existing ones', await pg.locator('[data-existing]').count() === 0);
+  await pg.close();
+
   ok('no browser errors', errors.length === 0, errors.join(' | '));
   await browser.close(); srv.close();
   console.log(bad ? '\n' + bad + ' FAILED' : '\nALL UI TESTS PASSED'); process.exit(bad ? 1 : 0);
