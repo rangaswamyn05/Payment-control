@@ -218,6 +218,14 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
     r0 = await call('GET', 'requests', null, ow); const rq = (r0.j.requests || []).find(x => x.orderCode === 'mm-2' && x.kind === 'change_plan'); ok('request is listed for the manager', !!rq);
     r0 = await call('POST', 'requests/' + rq.id + '/approve', {}, mg); ok('manager can approve a plan change', r0.s === 200, JSON.stringify(r0.j));
   }
+  { const imgC = (await call('POST', 'images', { dataUrl: PNG }, up)).j.id;
+    let r0 = await call('POST', 'orders', { phone: P(), code: 'close-1', customer: 'x', total: 5000, firstPayment: { mode: 'upi', amount: '5000', date: '2026-11-25T10:00', txnId: 'CLOSE0001', imageId: imgC } }, up);
+    r0 = await call('POST', 'orders/close-1/approve', {}, ow);
+    r0 = await call('GET', 'payments?order=close-1', null, ow); const cp = (r0.j.payments || [])[0];
+    r0 = await call('POST', 'payments/' + cp.id + '/verify', { note: 'seen in the bank app' }, mg);
+    r0 = await call('GET', 'orders', null, ow); const co = (r0.j.orders || []).find(o => o.code === 'close-1');
+    ok('order closes by itself once the last payment is validated', co && co.status === 'closed', JSON.stringify(co && co.status));
+  }
   console.log(bad ? '\n' + bad + ' FAILED' : '\nALL API TESTS PASSED');
   srv.close(); mock.close(); process.exit(bad ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

@@ -248,6 +248,18 @@ async function afterApprove(me, o, settings) {
   for (const p of (await db.all('payments')).filter(x => x.orderCode === o.code && x.status !== 'rejected')) await runConnectors('created', p, o, me);
 }
 
+// An order closes by itself once every rupee of it is validated or approved and nothing is flagged or waiting.
+async function autoClose(me, code) {
+  try {
+    const o = (await db.all('orders')).find(x => x.code === code);
+    if (!o || o.status !== 'open') return;
+    const v = orderView(o, await db.all('payments'));
+    if (v.outstanding > 0.005 || v.outstandingVerified > 0.005 || v.flaggedCount || v.pendingCash) return;
+    await db.update('orders', o.id, { status: 'closed', closedAt: new Date().toISOString(), closedBy: 'auto' });
+    await audit(me, 'order_auto_closed', 'order', o.code, 'Fully paid and validated');
+    if (o.createdById) await notify('user:' + o.createdById, `${o.code} is fully paid and validated. The order is closed.`, o.code);
+  } catch (e) { /* closing is a convenience, never block a payment */ }
+}
 async function applyAdjust(me, o, r, settings) {
   const at = new Date().toISOString();
   let n;
@@ -684,6 +696,7 @@ async function route(req, res) {
       const n = await db.update('payments', p.id, patch);
       await audit(me, action, 'payment', p.id, `${p.orderCode} ${p.amount}. ${detail || ''}`);
       await runConnectors(event || action, n, order || { code: p.orderCode }, me);
+      await autoClose(me, p.orderCode);
       if (p.createdBy && p.createdBy !== me.id && ['payment_rejected', 'owner_approved'].includes(action)) await notify('user:' + p.createdBy, `${p.orderCode}: your ${inr(p.amount)} entry was ${action === 'owner_approved' ? 'approved' : 'rejected: ' + String(detail || '').slice(0, 80)}.`, p.orderCode);
       return send(res, 200, { payment: n });
     };
@@ -858,6 +871,7 @@ async function route(req, res) {
         await audit(me, 'payment_verified_statement', 'payment', p.id, `${p.orderCode} ${p.amount} matched on ${p._m.how}`);
         matched.push({ id: p.id, orderCode: p.orderCode, amount: p.amount, how: p._m.how });
         await runConnectors('verified', { ...p, status: 'verified' }, allOrders.find(o => o.code === p.orderCode) || { code: p.orderCode }, me);
+        await autoClose(me, p.orderCode);
       } else if (p.status === 'client_reported') {
         await db.update('payments', p.id, { stmtUnableAt: new Date().toISOString() });
         await audit(me, 'payment_unable_to_validate', 'payment', p.id, `${p.orderCode} ${p.amount} not found in statement ${from} to ${to}`);
