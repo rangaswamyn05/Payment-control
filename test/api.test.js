@@ -52,6 +52,8 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
   r = await call('POST', 'payments', base1, up); ok('same transaction id refused as duplicate', r.s === 409 && r.j.duplicate === true);
   r = await call('POST', 'payments', { ...base1, mode: 'cheque', txnId: '' }, up); ok('cheque without a cheque number is rejected', r.s === 400 && r.j.needTxn === true);
   r = await call('POST', 'payments', { ...base1, mode: 'cheque' }, up); ok('cheque number already recorded is refused as duplicate', r.s === 409 && r.j.duplicate === true);
+  r = await call('POST', 'payments', { ...base1, mode: 'card', txnId: '' }, up); ok('card payment without a payment ID is rejected', r.s === 400 && r.j.needTxn === true);
+  r = await call('POST', 'payments', { ...base1, mode: 'card' }, up); ok('card payment ID already recorded is refused as duplicate', r.s === 409 && r.j.duplicate === true);
   const p2 = { orderCode: 'DEMO-1001', mode: 'transfer', amount: 5000, date: '2026-11-25T14:11', txnId: 'NEFT0002', imageId: img };
   r = await call('POST', 'payments', { ...p2, seq: 4 }, up); ok('wrong payment number asks for a reason', r.s === 409 && r.j.needReason === true && r.j.expected === 2);
   r = await call('POST', 'payments', { ...p2, seq: 4, seqReason: 'Third and fourth were paid in cash' }, up); ok('out-of-order number accepted with a reason, no manager step', r.s === 200 && r.j.payment.seq === 4 && !r.j.payment.needsOwner);

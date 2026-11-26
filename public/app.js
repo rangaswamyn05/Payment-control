@@ -15,7 +15,7 @@ function fdate(d) {
   if (m[4]) { let h = +m[4]; const ap = h >= 12 ? 'pm' : 'am'; h = h % 12 || 12; s += `, ${h}:${m[5]} ${ap}`; }
   return s;
 }
-const MODE = { upi: 'UPI', transfer: 'Bank transfer', cheque: 'Cheque', cash: 'Cash' };
+const MODE = { upi: 'UPI', transfer: 'Bank transfer', cheque: 'Cheque', card: 'Card / Razorpay', cash: 'Cash' };
 const STATUS = {
   client_reported: ['Validation pending', 'warn'], verified: ['Verified', 'good'], cash_pending: ['Cash: owner to approve', 'warn'],
   cash_confirmed: ['Cash approved', 'good'], flagged: ['Flagged', 'bad'], rejected: ['Rejected', ''],
