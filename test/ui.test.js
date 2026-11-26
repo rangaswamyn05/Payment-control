@@ -52,7 +52,7 @@ fs.mkdirSync('/tmp/pcshots', { recursive: true });
   await pg.fill('#ond', '2030-01-01'); await pg.click('#af button[type=submit]'); await pg.waitForSelector('text=Payment 1 saved');
   ok('cash tells sales the owner will approve it', (await pg.textContent('main')).includes('owner will approve'));
   await pg.goto(base + '/#/new-order'); await pg.waitForSelector('#nf');
-  await pg.fill('#oph', '+1 646 555 0100'); await pg.fill('#oc', 'UI-1'); await pg.fill('#ocu', 'Browser client'); await pg.fill('#ot', '90000');
+  await pg.fill('#oph', '+91 98765 00100'); await pg.fill('#oc', 'UI-1'); await pg.fill('#ocu', 'Browser client'); await pg.fill('#ot', '90000');
   await pg.setInputFiles('#pz input', { name: 'adv.png', mimeType: 'image/png', buffer: PNG });
   await pg.waitForFunction(() => document.getElementById('p_a') && document.getElementById('p_a').value === '5000', null, { timeout: 8000 });
   await pg.click('[data-dmode=skip]'); await pg.fill('#p_r', 'UITXN0001'); await pg.click('#nf button[type=submit]'); await pg.waitForSelector('text=Sent for approval');
@@ -135,7 +135,7 @@ fs.mkdirSync('/tmp/pcshots', { recursive: true });
   // ---- sales finds an order by phone number
   pg = await newPage(390, 844); await login(pg, 'uploader');
   await pg.goto(base + '/#/add'); await pg.waitForSelector('#f_ph');
-  await pg.fill('#f_ph', '646 555 0100'); await pg.waitForSelector('[data-pick]');
+  await pg.fill('#f_ph', '98765 00100'); await pg.waitForSelector('[data-pick]');
   ok('typing the phone number lists the customer’s open order', (await pg.textContent('[data-pick]')).includes('UI-1'));
   await pg.click('[data-pick]'); await pg.waitForFunction(() => /order total/.test(document.getElementById('ohint').textContent));
   ok('tapping it fills the order ID and shows the client', await pg.inputValue('#f_o') === 'UI-1' && (await pg.textContent('#ohint')).includes('Browser client'));
@@ -144,11 +144,11 @@ fs.mkdirSync('/tmp/pcshots', { recursive: true });
   // ---- new order for a customer who already has one: pick the existing order instead
   pg = await newPage(390, 844); await login(pg, 'uploader');
   await pg.goto(base + '/#/new-order'); await pg.waitForSelector('#oph');
-  await pg.fill('#oph', '646-555-0100'); await pg.waitForSelector('[data-existing]');
+  await pg.fill('#oph', '98765-00100'); await pg.waitForSelector('[data-existing]');
   ok('a known phone number offers the customer’s existing orders', (await pg.textContent('[data-existing]')).includes('UI-1'));
   await pg.click('[data-existing]'); await pg.waitForSelector('#f_s');
   ok('choosing one goes to Add payment for that order (a later payment, not a new order)', pg.url().endsWith('#/add') && await pg.inputValue('#f_o') === 'UI-1');
-  await pg.goto(base + '/#/new-order'); await pg.waitForSelector('#oph'); await pg.fill('#oph', '646-555-0100'); await pg.waitForSelector('[data-newone]'); await pg.click('[data-newone]'); await pg.waitForFunction(() => !document.querySelector('[data-existing]'));
+  await pg.goto(base + '/#/new-order'); await pg.waitForSelector('#oph'); await pg.fill('#oph', '98765-00100'); await pg.waitForSelector('[data-newone]'); await pg.click('[data-newone]'); await pg.waitForFunction(() => !document.querySelector('[data-existing]'));
   ok('"It\'s a new order" skips the existing ones', await pg.locator('[data-existing]').count() === 0);
   await pg.close();
 

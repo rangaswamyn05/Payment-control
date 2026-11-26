@@ -80,6 +80,8 @@ function sums(pays) {
 }
 
 const digits = x => String(x || '').replace(/\D/g, '');
+// Indian mobile number: exactly 10 digits, with an optional +91 or 0 in front. Returns the 10 digits or ''.
+const tenDigits = x => { let d = digits(x); if (d.length === 12 && d.startsWith('91')) d = d.slice(2); else if (d.length === 11 && d.startsWith('0')) d = d.slice(1); return d.length === 10 ? d : ''; };
 const NOTE_MANUAL = 'Manually validated, not system validated';
 const NOTE_PROVIDE = 'Provide statements to validate';
 const NOTE_UNABLE = 'Unable to validate with the statements provided. Provide another statement.';
@@ -523,8 +525,8 @@ async function route(req, res) {
         if (settings.orderIdMode !== 'auto') throw new HttpErr(400, 'Enter the order ID');
         const n = orders.map(o => /^ORD-(\d+)$/.exec(o.code)).filter(Boolean).map(x => +x[1]); code = 'ORD-' + ((n.length ? Math.max(...n) : 1000) + 1);
       }
-      const phoneDigits = digits(body.phone);
-      if (phoneDigits.length < 7 || phoneDigits.length > 15) throw new HttpErr(400, 'Enter the customer’s phone number');
+      const phoneDigits = tenDigits(body.phone);
+      if (!phoneDigits) throw new HttpErr(400, 'Enter the customer’s 10-digit phone number', { badPhone: true });
       const same = orders.filter(o => o.phone && digits(o.phone).slice(-10) === phoneDigits.slice(-10) && o.status !== 'rejected');
       if (same.length && body.confirmSamePhone !== true) throw new HttpErr(409, `This phone number already has ${same.length === 1 ? 'order ' + same[0].code : same.length + ' orders'}. Is it the same customer?`, { samePhone: same.slice(0, 5).map(o => ({ code: o.code, customer: o.customer, status: o.status })) });
       if (!/^[A-Za-z0-9._-]{2,24}$/.test(code)) throw new HttpErr(400, 'Order ID can use letters, numbers, dot, dash and underscore');

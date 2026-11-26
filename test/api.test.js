@@ -228,6 +228,10 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
   }
   { const r0 = await call('POST', 'ocr', { text: 'Completed\n\u20b95,000\nRemarks: advance for DEMO-1001\nUPI transaction ID\n632912345678' }, up);
     ok('screenshot remark naming an open order is matched to it', r0.s === 200 && r0.j.parsed && r0.j.parsed.orderMatches && r0.j.parsed.orderMatches.includes('DEMO-1001'), JSON.stringify(r0.j)); }
+  { const imgP = (await call('POST', 'images', { dataUrl: PNG }, up)).j.id; const fpp = n => ({ mode: 'upi', amount: '1000', date: '2026-11-25T10:00', txnId: 'PH' + n, imageId: imgP });
+    let r0 = await call('POST', 'orders', { phone: '98765432', code: 'ph-1', customer: 'x', total: 1000, firstPayment: fpp('1') }, up); ok('9-digit phone is refused', r0.s === 400 && r0.j.badPhone === true, JSON.stringify(r0.j));
+    r0 = await call('POST', 'orders', { phone: '987654321012', code: 'ph-2', customer: 'x', total: 1000, firstPayment: fpp('2') }, up); ok('12-digit phone without +91 is refused', r0.s === 400 && r0.j.badPhone === true, JSON.stringify(r0.j));
+    r0 = await call('POST', 'orders', { phone: '+91 98765 43211', code: 'ph-3', customer: 'x', total: 1000, firstPayment: fpp('3') }, up); ok('+91 and 10 digits is accepted', r0.s === 200, JSON.stringify(r0.j)); }
   console.log(bad ? '\n' + bad + ' FAILED' : '\nALL API TESTS PASSED');
   srv.close(); mock.close(); process.exit(bad ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
