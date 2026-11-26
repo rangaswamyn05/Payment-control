@@ -29,5 +29,6 @@ eq('no schedule in plain text', parseSchedule('Thank you 1234'), []);
 eq('rupee sign read as a percent sign', parseUpi('Completed\n\n% 30,000\n\nTo: Ramesh Kumar\nNov 25, 2026, 2:11 PM\nUPI transaction ID\n632912345678').amount, 30000);
 { const u = parseUpi('Payment successful\n25,000\nPaid to Ramesh\n25 Nov 2026, 2:11 PM\nUPI Transaction ID\nT2611251411ABCD'); eq('lone number with no rupee sign is flagged and offers the number without a leading 2', [u.amountUnsure, u.amount, u.altAmount], [true, 25000, 5000]); }
 { const u = parseUpi('Paid ₹25,000\nTo Ramesh'); eq('amount with a rupee sign is trusted', [u.amountUnsure, u.altAmount], [undefined, undefined]); }
+eq('phone number shown on the screenshot is read', [parseUpi('WhatsApp\n+91 98765 43210\nPaid ₹5,000\nUPI transaction ID\n632912345678').phone, parseUpi('Paid ₹5,000\nUPI transaction ID\n632912345678').phone], ['9876543210', undefined]);
 console.log(bad ? bad + ' FAILED' : 'ALL PARSER TESTS PASSED');
 process.exit(bad ? 1 : 0);
