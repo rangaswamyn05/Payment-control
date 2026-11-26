@@ -632,7 +632,7 @@ async function route(req, res) {
       if (order.status === 'rejected') throw new HttpErr(400, 'That order was sent back. Fix it and send it again first.');
       const v0 = orderView(order, await db.all('payments'));
       const hasPlan = !!(order.schedule && order.schedule.length);
-      if (!hasPlan && !body.nextDue && r2(order.total - v0.collected - r2(body.amount)) > 0.005) throw new HttpErr(400, 'Add the next payment due date', { needDue: true });
+      if (!hasPlan && !body.nextDue && body.skipDue !== true && r2(order.total - v0.collected - r2(body.amount)) > 0.005) throw new HttpErr(400, 'Add the next payment due date', { needDue: true });
       const newDue = body.nextDue && !(order.schedule && order.schedule.length) && (order.createdById === me.id || RANK[me.role] >= RANK.manager) ? parseDue({ nextDue: body.nextDue }, order.total) : null;
       const { p, notice } = await addPayment(me, order, body);
       if (newDue) await db.update('orders', order.id, newDue);
