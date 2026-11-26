@@ -458,8 +458,11 @@ async function route(req, res) {
       const total = r2(body.total);
       if (!(total > 0)) throw new HttpErr(400, 'Enter the order total');
       if (!String(body.customer || '').trim()) throw new HttpErr(400, 'Enter the client name');
-      let code = String(body.code || '').trim();
-      if (!code) { const n = orders.map(o => /^ORD-(\d+)$/.exec(o.code)).filter(Boolean).map(x => +x[1]); code = 'ORD-' + ((n.length ? Math.max(...n) : 1000) + 1); }
+      let code = settings.orderIdMode === 'auto' ? '' : String(body.code || '').trim();
+      if (!code) {
+        if (settings.orderIdMode !== 'auto') throw new HttpErr(400, 'Enter the order ID');
+        const n = orders.map(o => /^ORD-(\d+)$/.exec(o.code)).filter(Boolean).map(x => +x[1]); code = 'ORD-' + ((n.length ? Math.max(...n) : 1000) + 1);
+      }
       const phoneDigits = digits(body.phone);
       if (phoneDigits.length < 7 || phoneDigits.length > 15) throw new HttpErr(400, 'Enter the customer’s phone number');
       const same = orders.filter(o => o.phone && digits(o.phone).slice(-10) === phoneDigits.slice(-10) && o.status !== 'rejected');
