@@ -48,15 +48,15 @@ async function dispatch(event, payment, order, settings) {
   if (api && apiOn(settings) && api.url && !validateUrl(api.url)) results.push(await sendApi(api, event, payment, order));
   const extra = (settings && settings.connectors && settings.connectors.extra) || [];
   if (apiOn(settings)) for (const x of extra) if (x && x.url && !validateUrl(x.url)) results.push({ ...(await sendApi(x, event, payment, order)), name: x.name || '' });
-  if (event !== 'test' && sheetOn(settings)) { const r = await appendRow('Payments', [new Date().toISOString(), event, payment.id, order.code, payment.amount, payment.mode, payment.date, payment.txnId || '', payment.status]); if (r) results.push(r); }
+  if (event !== 'test' && sheetOn(settings)) { const r = await appendRow('Payments', [new Date().toISOString(), event, payment.id, order.code, payment.amount, payment.mode, payment.date, payment.txnId || '', payment.status], sheetIdOf(settings)); if (r) results.push(r); }
   return results;
 }
 
 // ----- Google Sheets (service account, append only; never edits or deletes rows)
 let tok = { v: '', exp: 0 };
 const b64 = x => Buffer.from(x).toString('base64url');
-function sheetsConfig() {
-  const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL, key = (process.env.GOOGLE_SERVICE_ACCOUNT_KEY || '').replace(/\\n/g, '\n'), id = process.env.SHEETS_ID;
+function sheetsConfig(sid) {
+  const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL, key = (process.env.GOOGLE_SERVICE_ACCOUNT_KEY || '').replace(/\\n/g, '\n'), id = sid || process.env.SHEETS_ID;
   return email && key && id ? { email, key, id } : null;
 }
 async function sheetsToken(c) {
@@ -72,8 +72,8 @@ async function sheetsToken(c) {
   tok = { v: j.access_token, exp: Date.now() + (j.expires_in || 3600) * 1000 };
   return tok.v;
 }
-async function appendRow(tab, row) {
-  const c = sheetsConfig();
+async function appendRow(tab, row, sid) {
+  const c = sheetsConfig(sid);
   if (!c) return null;
   try {
     const t = await sheetsToken(c);
@@ -83,12 +83,27 @@ async function appendRow(tab, row) {
     return { connector: 'sheets', ok: r.ok, status: r.status };
   } catch (e) { return { connector: 'sheets', ok: false, error: String(e && e.message || e).slice(0, 120) }; }
 }
-const sheetOn = st => !!st && ['app_sheet', 'all'].includes(st.storage);
+const sheetIdOf = st => (st && st.sheet && st.sheet.id) || '';
+const sheetOn = st => !!st && (['app_sheet', 'all'].includes(st.storage) || !!sheetIdOf(st));
+function sheetIdFromLink(x) { const m = /\/spreadsheets\/d\/([\w-]{20,})/.exec(String(x || '')); return m ? m[1] : (/^[\w-]{30,}$/.test(String(x || '').trim()) ? String(x).trim() : ''); }
+async function prepareSheet(sid) {
+  const c = sheetsConfig(sid); if (!c) return { ok: false, error: 'Google Sheets is not switched on for this app yet' };
+  try {
+    const t = await sheetsToken(c), base = process.env.ALLOW_LOCAL_CONNECTORS === '1' && process.env.SHEETS_API_BASE ? process.env.SHEETS_API_BASE : 'https://sheets.googleapis.com';
+    const h = { Authorization: 'Bearer ' + t, 'Content-Type': 'application/json' };
+    const m = await fetch(`${base}/v4/spreadsheets/${encodeURIComponent(sid)}?fields=sheets.properties.title`, { headers: h });
+    if (!m.ok) return { ok: false, status: m.status, error: m.status === 404 || m.status === 403 ? 'Cannot open that sheet. Share it with the email shown, as Editor' : 'Google answered ' + m.status };
+    const have = ((await m.json()).sheets || []).map(x => x.properties.title);
+    const need = ['Payments', 'Orders'].filter(x => !have.includes(x));
+    if (need.length) { const b = await fetch(`${base}/v4/spreadsheets/${encodeURIComponent(sid)}:batchUpdate`, { method: 'POST', headers: h, body: JSON.stringify({ requests: need.map(title => ({ addSheet: { properties: { title } } })) }) }); if (!b.ok) return { ok: false, status: b.status, error: 'Could not add the Payments and Orders tabs. Is the email an Editor?' }; }
+    return { ok: true };
+  } catch (e) { return { ok: false, error: String(e && e.message || e).slice(0, 120) }; }
+}
 const apiOn = st => !!(st && st.connectors && st.connectors.api && st.connectors.api.enabled) || (!!st && ['app_api', 'all'].includes(st.storage));
 async function dispatchOrder(event, order, settings) {
   if (!sheetOn(settings)) return [];
-  const r = await appendRow('Orders', [new Date().toISOString(), event, order.code, order.customer, order.total, order.createdBy || '', order.approvedBy || '']);
+  const r = await appendRow('Orders', [new Date().toISOString(), event, order.code, order.customer, order.total, order.createdBy || '', order.approvedBy || ''], sheetIdOf(settings));
   return r ? [r] : [];
 }
 
-module.exports = { dispatch, dispatchOrder, appendRow, sheetsConfig, validateUrl };
+module.exports = { dispatch, dispatchOrder, appendRow, sheetsConfig, validateUrl, sheetIdFromLink, prepareSheet };

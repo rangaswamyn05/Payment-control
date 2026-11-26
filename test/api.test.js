@@ -196,6 +196,15 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
   const row = ap && JSON.parse(ap.d).values[0];
   ok('row holds order id, client, total, approver; formula text is neutralised', row && row[2] === r.j.order.code && row[4] === '7000' && row[6] === 'Demo Manager' && row[3].startsWith("'="));
   ok('uses append only', !!ap && ap.u.includes(':append') && !gl.some(g => /clear|delete/i.test(g.u)));
+  { // each customer's own sheet
+    const mine = 'abcdefghijklmnopqrstuvwxyz1234567890';
+    let q0 = await call('PUT', 'settings', { storage: 'app', sheetLink: 'not a link' }, ow); ok('bad sheet link refused', q0.s === 400);
+    q0 = await call('PUT', 'settings', { storage: 'app', sheetLink: 'https://docs.google.com/spreadsheets/d/' + mine + '/edit#gid=0' }, ow); ok('sheet link saved', q0.s === 200, JSON.stringify(q0.j));
+    q0 = await call('GET', 'settings', null, ow); ok('owner sees sheet id, service email and ready flag', q0.j.settings.sheet.id === mine && q0.j.settings.sheetEmail === 'svc@test.iam' && q0.j.settings.sheetReady === true);
+    q0 = await call('GET', 'settings', null, mg); ok('manager does not see sheet id or email', !q0.j.settings.sheet.id && !q0.j.settings.sheetEmail);
+    gl.length = 0; q0 = await call('POST', 'settings/test-sheet', {}, ow);
+    ok('test row goes to the customer sheet, tabs prepared', q0.j.ok === true && gl.some(g => g.u.includes('/' + mine + ':batchUpdate')) && gl.some(g => g.u.includes('/' + mine + '/values/Payments')), JSON.stringify([q0.j, gl.map(g => g.u)]));
+    await call('PUT', 'settings', { sheetLink: '' }, ow); }
   gm.close();
   { const img2 = (await call('POST', 'images', { dataUrl: PNG }, up)).j.id;
   const fp = (n, amt) => ({ mode: 'upi', amount: String(amt), date: '2026-11-25T10:00', txnId: 'PLANTXN' + n, imageId: img2 });

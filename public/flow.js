@@ -448,6 +448,9 @@ async function viewSettings() {
   <div class="field"><label for="au">Endpoint URL</label><input id="au" class="in" placeholder="https://your-panel.example.com/api/record-payment" value="${esc(a.url)}"></div>
   <div class="field"><label for="ak">Secret key ${a.keySet ? '<span class="opt">(saved, leave blank to keep it)</span>' : ''}</label><input id="ak" type="password" class="in" autocomplete="off"></div>
   <div id="syss">${((s.connectors.extra) || []).map(sysRow).join('')}</div><button class="btn" type="button" id="addsys" style="margin-bottom:10px">+ Add another system</button>
+  <h2 style="margin:16px 0 6px">Or send to a Google Sheet <span class="opt">(optional)</span></h2>
+  <div class="muted" style="font-size:13px;margin-bottom:8px">Every approved order and payment is added as a new row. Rows are never edited or deleted.</div>
+  ${s.sheetReady ? `<div class="field"><label for="shl">Your Google Sheet link</label><input id="shl" class="in" placeholder="https://docs.google.com/spreadsheets/d/..." value="${s.sheet && s.sheet.id ? esc('https://docs.google.com/spreadsheets/d/' + s.sheet.id) : ''}"></div><div class="note" style="margin-bottom:8px">Open your sheet, tap <b>Share</b>, add <b id="shem">${esc(s.sheetEmail)}</b> as <b>Editor</b>. Then paste the link above and save.</div><button class="btn" type="button" data-act="testSheet">Send a test row</button>` : `<div class="note warn">Google Sheet sending is not switched on for this app yet. The app owner adds one Google key once, then this appears.</div>`}
   <div class="err" id="serr" style="min-height:18px"></div><div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn p" type="submit">Save settings</button><button class="btn" type="button" data-act="testApi">Send a test call</button></div></div>
   <div class="card b"><h2 style="margin-bottom:10px">This workspace</h2><div style="display:flex;flex-direction:column;gap:8px"><div>Storage: <b>${S.health.db === 'supabase' ? 'Database connected' : 'Demo (temporary)'}</b></div><div>Screenshot reading: <b>${S.health.ocr ? 'On' : 'Off'}</b></div></div><p class="muted" style="font-size:13px;margin-top:14px">Approval rules, dashboard views and alerts you can set here today are the limits above. Setting them by chat is planned.</p></div></form>`,
     after() {
@@ -468,7 +471,7 @@ async function viewSettings() {
         try {
           if (!v('ba').trim()) throw new Error('Enter your business address. It goes on every invoice');
           if (!bn.checked && !v('bt').trim()) throw new Error('Enter your GST or tax number, or tick that it is not applicable');
-          await api('PUT', 'settings', { accounts: readAccs(), extraSystems: readSys(), businessName: v('bz'), onboarded: true, storage: v('st'), orderIdMode: v('om'), invoiceSampleId: sampleId,
+          await api('PUT', 'settings', { ...(document.getElementById('shl') ? { sheetLink: document.getElementById('shl').value } : {}), accounts: readAccs(), extraSystems: readSys(), businessName: v('bz'), onboarded: true, storage: v('st'), orderIdMode: v('om'), invoiceSampleId: sampleId,
             business: { name: v('bz'), kind: v('bk'), industry: v('bi'), gstRate: v('bg'), taxId: v('bt'), taxNA: bn.checked, address: v('ba'), contact: v('bc') },
             customerFields: v('cf').split(',').map(x => ({ label: x.trim() })).filter(x => x.label),
             limits: { singlePayment: v('l1').replace(/,/g, ''), collectionThreshold: v('l2').replace(/,/g, '') },

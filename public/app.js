@@ -319,6 +319,7 @@ const ACT = {
   async rejectOrder(el) { const reason = await ask({ title: 'Reject this order', label: 'Reason', ok: 'Reject', danger: true }); if (!reason) return; try { await api('POST', `orders/${encodeURIComponent(el.dataset.code)}/reject`, { reason }); toast('Order rejected'); render(); } catch (ex) { toast(ex.message, true); } },
   async userToggle(el) { try { await api('PATCH', 'users/' + el.dataset.id, { active: el.dataset.active !== '1' }); render(); } catch (ex) { toast(ex.message, true); } },
   async userReset(el) { const pw = await ask({ title: 'Reset password', label: 'New password (at least 8 characters)', ok: 'Reset', minLen: 8 }); if (!pw) return; try { await api('PATCH', 'users/' + el.dataset.id, { password: pw }); toast('Password reset'); } catch (ex) { toast(ex.message, true); } },
+  async testSheet() { try { const r = await api('POST', 'settings/test-sheet'); toast(r.ok ? 'Test row added to your sheet' : (r.error || 'Could not add a row'), !r.ok); } catch (ex) { toast(ex.message, true); } },
   async testApi() { try { const r = await api('POST', 'settings/test-api'); const x = r.result; toast(x && x.ok ? 'Your system answered (' + x.status + ')' : 'Your system did not accept the call: ' + (x ? (x.status || x.error) : 'no result'), !(x && x.ok)); } catch (ex) { toast(ex.message, true); } },
 };
 document.addEventListener('click', e => { const t = e.target.closest('[data-act]'); if (t && ACT[t.dataset.act]) { if (t.tagName === 'A') { if (t.dataset.act === 'logout') e.preventDefault(); } ACT[t.dataset.act](t, e); } });
