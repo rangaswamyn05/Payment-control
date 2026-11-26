@@ -205,6 +205,12 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
     gl.length = 0; q0 = await call('POST', 'settings/test-sheet', {}, ow);
     ok('test row goes to the customer sheet, tabs prepared', q0.j.ok === true && gl.some(g => g.u.includes('/' + mine + ':batchUpdate')) && gl.some(g => g.u.includes('/' + mine + '/values/Payments')), JSON.stringify([q0.j, gl.map(g => g.u)]));
     await call('PUT', 'settings', { sheetLink: '' }, ow); }
+  { // the whole downloaded JSON file pasted as the key still works
+    const keep = process.env.GOOGLE_SERVICE_ACCOUNT_KEY, pem = keep.replace(/\\n/g, '\n');
+    process.env.GOOGLE_SERVICE_ACCOUNT_KEY = JSON.stringify({ type: 'service_account', client_email: 'svc@test.iam', private_key: pem });
+    const { sheetsConfig } = require('../api/_lib/connectors'); const c0 = sheetsConfig('x');
+    ok('whole JSON key file is accepted', !!c0 && c0.key.includes('BEGIN PRIVATE KEY') && c0.email === 'svc@test.iam');
+    process.env.GOOGLE_SERVICE_ACCOUNT_KEY = keep; }
   gm.close();
   { const img2 = (await call('POST', 'images', { dataUrl: PNG }, up)).j.id;
   const fp = (n, amt) => ({ mode: 'upi', amount: String(amt), date: '2026-11-25T10:00', txnId: 'PLANTXN' + n, imageId: img2 });

@@ -56,7 +56,10 @@ async function dispatch(event, payment, order, settings) {
 let tok = { v: '', exp: 0 };
 const b64 = x => Buffer.from(x).toString('base64url');
 function sheetsConfig(sid) {
-  const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL, key = (process.env.GOOGLE_SERVICE_ACCOUNT_KEY || '').replace(/\\n/g, '\n'), id = sid || process.env.SHEETS_ID;
+  let email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL, raw = (process.env.GOOGLE_SERVICE_ACCOUNT_KEY || '').trim(), id = sid || process.env.SHEETS_ID;
+  // The whole downloaded JSON file may be pasted: take the private key (and email) out of it.
+  if (raw.startsWith('{')) { try { const j = JSON.parse(raw); raw = String(j.private_key || ''); email = email || j.client_email; } catch (e) { raw = ''; } }
+  const key = raw.replace(/\\n/g, '\n');
   return email && key && id ? { email, key, id } : null;
 }
 async function sheetsToken(c) {
