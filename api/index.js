@@ -261,8 +261,9 @@ async function route(req, res) {
   const [a, b, c] = seg;
 
   if (a === 'health' && m === 'GET') {
-    await ensureSeed();
-    const users = await db.all('users');
+    let users;
+    try { await ensureSeed(); users = await db.all('users'); }
+    catch (e) { return send(res, 503, { ok: false, error: 'Database problem: ' + String(e.message || e).replace(/eyJ[\w.-]+/g, '[key]').slice(0, 200) }); }
     return send(res, 200, { ok: true, db: db.kind, ocr: !!process.env.GOOGLE_VISION_KEY, needsSetup: users.length === 0, demo: users.some(u => u.demo), secretSet: A.secretIsSet });
   }
 

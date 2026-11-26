@@ -310,7 +310,7 @@ let rid = 0;
 async function render() {
   const my = ++rid;
   const parts = (location.hash.replace(/^#\/?/, '') || '').split('/').filter(Boolean).map(decodeURIComponent);
-  if (!S.health) { try { S.health = await api('GET', 'health'); } catch (e) { $app.innerHTML = '<div class="login"><div class="note bad">Cannot reach the server. Please try again.</div></div>'; return; } }
+  if (!S.health) { try { S.health = await api('GET', 'health'); } catch (e) { $app.innerHTML = `<div class="login"><div class="note bad">${esc(e.data && e.data.error ? e.data.error : 'Cannot reach the server. Please try again.')}</div></div>`; return; } }
   if (!S.tok) { const v = viewLogin(); $app.innerHTML = v.html; v.after(); return; }
   if (!S.user) { try { S.user = (await api('GET', 'me')).user; } catch (e) { return; } }
   const mgr = RANK[S.user.role] >= RANK.manager, owner = S.user.role === 'owner';
