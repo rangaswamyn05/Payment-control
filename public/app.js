@@ -91,11 +91,11 @@ function shell(active, inner) {
   const u = S.user; const mgr = RANK[u.role] >= RANK.manager;
   const items = [];
   if (mgr) items.push(['#/', 'Dashboard'], ['#/orders', 'Orders'], ['#/payments', 'Payments'], ['#/review', 'Review' + (S.badge ? `<span class="pill">${S.badge}</span>` : '')], ['#/statement', 'Statement']);
-  if (!mgr) items.push(['#/new-order', 'New order']);
-  items.push(['#/add', 'Add payment'], ['#/mine', mgr ? 'My entries' : 'My submissions'], ['#/inbox', 'Inbox' + (S.unread ? `<span class="pill">${S.unread}</span>` : '')]);
+  if (!mgr) items.push(['#/new-order', 'New order', 'New customer booking']);
+  items.push(['#/add', 'Add payment', 'Later instalment on an order'], ['#/mine', mgr ? 'My entries' : 'My submissions'], ['#/inbox', 'Inbox' + (S.unread ? `<span class="pill">${S.unread}</span>` : '')]);
   if (mgr) items.push(['#/audit', 'Audit log']);
   if (u.role === 'owner') items.push(['#/reports', 'Reports'], ['#/team', 'Team'], ['#/settings', 'Settings']);
-  const nav = items.map(([h, t]) => `<a href="${h}" class="${active === h ? 'on' : ''}">${t}</a>`).join('');
+  const nav = items.map(([h, t, hint]) => `<a href="${h}" class="${active === h ? 'on' : ''}"${hint ? ` title="${hint}"` : ''}>${t}${hint ? `<small>${hint}</small>` : ''}</a>`).join('');
   return `<header class="top"><div class="brand"><div class="logo">${ICON.shield}</div><span>Payment Control</span></div><nav class="nav" aria-label="Main">${nav}</nav><div class="me"><div style="text-align:right"><div style="font-weight:600">${esc(u.name)}</div><div class="muted" style="font-size:12px;text-transform:capitalize">${esc(u.role)} · <a href="#/login" data-act="logout" style="text-decoration:underline">Sign out</a></div></div><div class="av">${esc(u.name[0] || '?')}</div></div></header>${S.health && S.health.db === 'memory' ? '<div class="note warn" style="border-radius:0;text-align:center">Demo storage: data is not saved permanently until the database is connected.</div>' : ''}<main class="wrap">${inner}</main>`;
 }
 
