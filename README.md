@@ -100,3 +100,8 @@ Static pages in `public/`, one serverless function in `api/index.js` (no depende
 - Owner: Settings (business, GST or tax number, customer fields, storage, limits), Reports with download, Clear old files (after download).
 - Storage choices that include a Google Sheet or your own system only append copies. The app always keeps every record.
 - Run `node test/api.test.js` and `node test/ui.test.js`.
+
+## Evaluation before going live
+
+- `node eval/run-reader.js` scores what the app extracts from payment screenshots (amount, transaction ID, date, phone, payment plan) against expected answers, and fails if a wrong amount would be shown without a confirm prompt. Cases are in `eval/reader-cases.json`. Add a case for every real screenshot that misreads: paste the text from "What the reader saw".
+- `node eval/scenarios.js` runs ten business scenarios on demo data (full payment and auto-close, plans, mismatch approval, duplicate ID, missing ID, cash approval, wrong statement amount, role walls, total change approval).
