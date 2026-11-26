@@ -117,7 +117,7 @@ fs.mkdirSync('/tmp/pcshots', { recursive: true });
   ok('owner approves the cash', true);
   await pg.goto(base + '/#/settings'); await pg.waitForSelector('#sf2');
   ok('settings: storage dropdown, GST number rule, limits', !!(await pg.$('#st')) && !!(await pg.$('#bn')) && !!(await pg.$('#l1')));
-  await pg.fill('#bz', 'Acme Photos'); await pg.check('#bn'); await pg.selectOption('#st', 'app_sheet'); await pg.fill('#cf', 'Phone number'); await pg.fill('#l1', '50000');
+  await pg.fill('#bz', 'Acme Photos'); await pg.fill('#ba', '12 MG Road, Pune'); await pg.check('#bn'); await pg.selectOption('#st', 'app_sheet'); await pg.fill('#cf', 'Phone number'); await pg.fill('#l1', '50000');
   await pg.click('#sf2 button[type=submit]'); await pg.waitForSelector('text=Settings saved');
   ok('owner saves business setup', true);
   await pg.goto(base + '/#/orders/DEMO-1003'); await pg.waitForSelector('text=Adjust outstanding');
