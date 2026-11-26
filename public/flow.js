@@ -141,10 +141,10 @@ async function viewNewOrder() {
   const { settings } = await api('GET', 'settings');
   const N = S.newOrder || (S.newOrder = { code: '', phone: '', customer: '', total: '', extra: {}, P: newPay(), err: '', busy: false, done: null });
   if (N.done) return { active: '#/new-order', html: `<div style="max-width:520px;margin:0 auto"><div class="card" style="text-align:center;padding:32px 20px"><div class="tick">✓</div><h2 style="font-size:20px">Sent for approval</h2><p><b>${esc(N.done.code)}</b> · ${esc(N.done.customer)}</p><p class="muted">A manager or the owner will approve it. You will see a note in your Inbox if anything changes.</p><button class="btn p" style="width:100%;margin-top:14px" data-act="anotherOrder">Create another order</button></div></div>`, after() { DROP.cur = null; } };
-  const P = N.P, auto = settings.orderIdMode === 'auto';
+  const P = N.P;
   const extras = (settings.customerFields || []).map(f => `<div class="field"><label for="x_${f.key}">${esc(f.label)}</label><input id="x_${f.key}" class="in" data-x="${f.key}" value="${esc(N.extra[f.key] || '')}"></div>`).join('');
   return { active: '#/new-order', html: `<div style="max-width:520px;margin:0 auto"><div class="head" style="margin-bottom:12px"><h1 style="font-size:24px">New order</h1></div>
-  <form id="nf" novalidate><div class="card" style="margin-bottom:14px"><div class="field"><label for="oph">Customer phone number</label><input id="oph" class="in" data-n="phone" inputmode="tel" value="${esc(N.phone)}" autocomplete="off"></div><div class="two field">${auto ? '<div><label>Order ID</label><div class="muted" style="padding:12px 0">Created for you</div></div>' : `<div><label for="oc">Order ID</label><input id="oc" class="in" data-n="code" value="${esc(N.code)}" autocapitalize="characters" autocomplete="off"></div>`}<div><label for="ot">Total order value (₹)</label><input id="ot" class="in" data-n="total" inputmode="decimal" value="${esc(N.total)}"></div></div>
+  <form id="nf" novalidate><div class="card" style="margin-bottom:14px"><div class="field"><label for="oph">Customer phone number</label><input id="oph" class="in" data-n="phone" inputmode="tel" value="${esc(N.phone)}" autocomplete="off"></div><div class="two field"><div><label for="oc">Order ID <span class="opt">(blank = we create one)</span></label><input id="oc" class="in" data-n="code" value="${esc(N.code)}" autocapitalize="characters" autocomplete="off"></div><div><label for="ot">Total order value (₹)</label><input id="ot" class="in" data-n="total" inputmode="decimal" value="${esc(N.total)}"></div></div>
   <div class="field"><label for="ocu">Client name</label><input id="ocu" class="in" data-n="customer" value="${esc(N.customer)}"></div>${extras}</div>
   <div class="card"><h2 style="margin-bottom:10px">First advance payment</h2>${payFields(P)}<div class="err" id="nerr" style="min-height:18px;margin-bottom:6px">${esc(N.err || P.err || '')}</div><button class="btn p" type="submit" style="width:100%;min-height:52px" ${N.busy || P.busy ? 'disabled' : ''}>Send for approval</button></div></form></div>`,
     after() {
@@ -153,7 +153,7 @@ async function viewNewOrder() {
       document.querySelectorAll('[data-x]').forEach(el => el.addEventListener('input', () => { N.extra[el.dataset.x] = el.value; }));
       document.getElementById('nf').addEventListener('submit', async e => {
         e.preventDefault(); N.err = ''; P.err = '';
-        if (N.phone.replace(/\D/g, '').length < 7) N.err = 'Enter the customer’s phone number.'; else if (!auto && !N.code.trim()) N.err = 'Enter the order ID.'; else if (!N.customer.trim()) N.err = 'Enter the client name.'; else if (!(Number(String(N.total).replace(/,/g, '')) > 0)) N.err = 'Enter the total order value.';
+        if (N.phone.replace(/\D/g, '').length < 7) N.err = 'Enter the customer’s phone number.'; else if (!N.customer.trim()) N.err = 'Enter the client name.'; else if (!(Number(String(N.total).replace(/,/g, '')) > 0)) N.err = 'Enter the total order value.';
         else N.err = payCheck(P);
         if (N.err) { document.getElementById('nerr').textContent = N.err; return; }
         N.busy = true; render();
@@ -292,8 +292,6 @@ async function viewSettings() {
   <div class="field"><label for="ba">Address</label><input id="ba" class="in" value="${esc(b.address)}"></div><div class="field"><label for="bc">Phone and email on the invoice</label><input id="bc" class="in" value="${esc(b.contact)}"></div>
   <div class="field"><label for="cf">What to collect about each customer <span class="opt">(comma separated, e.g. Phone number)</span></label><input id="cf" class="in" value="${esc((s.customerFields || []).map(f => f.label).join(', '))}"><div class="muted" style="font-size:13px;margin-top:4px">Sales enters these once, when creating an order. They appear on the invoice.</div></div>
   <div class="field"><label>Sample invoice <span class="opt">(optional)</span></label>${dropZone('iz', s.invoiceSampleId ? 'Sample added. Drop a new one to replace it' : 'Drop a sample invoice here', 1)}<div class="muted" style="font-size:13px;margin-top:4px">Invoices follow this style. If it shows details we do not collect, we will ask you.</div></div>
-  <h2 style="margin:20px 0 10px">Order IDs</h2>
-  <div class="field"><label for="om">How are orders numbered?</label>${sel('om', [['own', 'I use my own order IDs (sales types them)'], ['auto', 'Create order IDs for me']], s.orderIdMode)}<div class="muted" style="font-size:13px;margin-top:4px">Every order also needs the customer's phone number. It lets sales find a customer's orders and warns about duplicates.</div></div>
   <h2 style="margin:20px 0 10px">Where records are kept</h2>
   <div class="field"><label for="st">Storage</label>${sel('st', STORES, s.storage)}<div class="muted" style="font-size:13px;margin-top:4px">Payment Control always keeps every record. The others receive a copy of each approved order and payment. They are only added to, never edited or deleted. Approvals and roles stay here.</div></div>
   <h2 style="margin:20px 0 10px">Limits and alerts</h2><div class="two field"><div><label for="l1">Owner approval above (₹)</label><input id="l1" class="in" inputmode="decimal" value="${lm.singlePayment || ''}" placeholder="No limit"></div><div><label for="l2">Alert when an order collects more than (₹)</label><input id="l2" class="in" inputmode="decimal" value="${lm.collectionThreshold || ''}" placeholder="No alert"></div></div>
@@ -311,7 +309,7 @@ async function viewSettings() {
         e.preventDefault(); const er = document.getElementById('serr'); er.textContent = '';
         const v = id => document.getElementById(id).value;
         try {
-          await api('PUT', 'settings', { businessName: v('bz'), onboarded: true, storage: v('st'), orderIdMode: v('om'), invoiceSampleId: sampleId,
+          await api('PUT', 'settings', { businessName: v('bz'), onboarded: true, storage: v('st'), invoiceSampleId: sampleId,
             business: { name: v('bz'), kind: v('bk'), industry: v('bi'), gstRate: v('bg'), taxId: v('bt'), taxNA: bn.checked, address: v('ba'), contact: v('bc') },
             customerFields: v('cf').split(',').map(x => ({ label: x.trim() })).filter(x => x.label),
             limits: { singlePayment: v('l1').replace(/,/g, ''), collectionThreshold: v('l2').replace(/,/g, '') },

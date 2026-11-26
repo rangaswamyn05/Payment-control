@@ -147,11 +147,11 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
   r = await call('POST', 'orders', { ...ord, code: 'S-9', confirmSamePhone: true, firstPayment: { ...ord.firstPayment, txnId: 'ADV-9' } }, up); ok('sales can go ahead after the warning', r.s === 200);
   r = await call('GET', 'orders/by-phone/98765%2043210', null, up); ok('sales types the phone and sees that customer’s open orders', r.s === 200 && r.j.orders.length === 1 && r.j.orders[0].code === 'S-1', JSON.stringify(r.j));
   ok('short numbers return nothing', (await call('GET', 'orders/by-phone/123', null, up)).j.orders.length === 0);
-  await call('PUT', 'settings', { customerFields: [], orderIdMode: 'auto' }, ow);
-  r = await call('POST', 'orders', { phone: P(), code: 'IGNORED', customer: 'Auto client', total: 500, firstPayment: { mode: 'cash', amount: 100, date: '2026-11-25' } }, up);
-  ok('automatic mode ignores typed IDs and numbers the order itself', r.s === 200 && /^ORD-\d+$/.test(r.j.order.code), JSON.stringify(r.j));
-  await call('PUT', 'settings', { orderIdMode: 'own' }, ow);
-  r = await call('POST', 'orders', { phone: P(), customer: 'No id', total: 500, firstPayment: { mode: 'cash', amount: 100, date: '2026-11-25' } }, up); ok('own-ID mode requires an order ID', r.s === 400);
+  await call('PUT', 'settings', { customerFields: [] }, ow);
+  r = await call('POST', 'orders', { phone: P(), customer: 'Auto client', total: 500, firstPayment: { mode: 'cash', amount: 100, date: '2026-11-25' } }, up);
+  ok('leaving the order ID blank makes the app create one', r.s === 200 && /^ORD-\d+$/.test(r.j.order.code), JSON.stringify(r.j));
+  r = await call('POST', 'orders', { phone: P(), code: 'MY-77', customer: 'Own id', total: 500, firstPayment: { mode: 'cash', amount: 100, date: '2026-11-25' } }, up);
+  ok('a typed business order ID is kept as is', r.s === 200 && r.j.order.code === 'MY-77', JSON.stringify(r.j));
 
   // reports and clear
   r = await call('GET', 'reports?period=all', null, ow); ok('owner report: revenue, collected, outstanding, validated, manual', r.s === 200 && r.j.report.revenue > 0 && r.j.report.manual > 0 && r.j.report.validated > 0);
