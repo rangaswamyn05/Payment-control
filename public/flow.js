@@ -415,6 +415,10 @@ const KINDS = ['Sole proprietor', 'Partnership', 'Private limited company', 'LLP
 const INDUSTRIES = ['Photography and events', 'Retail', 'Manufacturing', 'Services', 'Education', 'Healthcare', 'Real estate', 'Other'];
 const GSTS = ['', 'GST registered (regular)', 'GST composition scheme', 'Not registered'];
 const STORES = [['app', 'Payment Control only'], ['app_sheet', 'Payment Control + Google Sheet'], ['app_api', 'Payment Control + my own system (API)'], ['all', 'All three']];
+function accRow(x, i) {
+  x = x || {};
+  return `<div class="card" data-acc style="padding:12px;margin-bottom:8px"><input type="hidden" data-f="id" value="${esc(x.id || '')}"><div class="two field"><div><label>Account name</label><input class="in" data-f="name" value="${esc(x.name || '')}" placeholder="e.g. HDFC Current"></div><div><label>Bank</label><input class="in" data-f="bank" value="${esc(x.bank || '')}" placeholder="e.g. HDFC"></div></div><div class="two field"><div><label>Last 4 digits of the account number</label><input class="in" data-f="last4" inputmode="numeric" maxlength="4" value="${esc(x.last4 || '')}" placeholder="4321"></div><div><label>UPI ID(s) for this account <span class="opt">(comma separated)</span></label><input class="in" data-f="upi" value="${esc((x.upi || []).join(', '))}" placeholder="shop@okhdfcbank"></div></div><button class="btn" type="button" data-rmacc>Remove</button></div>`;
+}
 async function viewSettings() {
   const { settings: s } = await api('GET', 'settings');
   const a = s.connectors.api, b = s.business, lm = s.limits;
@@ -428,6 +432,8 @@ async function viewSettings() {
   <div class="field"><label for="ba">Address</label><input id="ba" class="in" value="${esc(b.address)}"></div><div class="field"><label for="bc">Phone and email on the invoice</label><input id="bc" class="in" value="${esc(b.contact)}"></div>
   <div class="field"><label for="cf">What to collect about each customer <span class="opt">(comma separated, e.g. Phone number)</span></label><input id="cf" class="in" value="${esc((s.customerFields || []).map(f => f.label).join(', '))}"><div class="muted" style="font-size:13px;margin-top:4px">Sales enters these once, when creating an order. They appear on the invoice.</div></div>
   <div class="field"><label>Sample invoice <span class="opt">(optional)</span></label>${dropZone('iz', s.invoiceSampleId ? 'Sample added. Drop a new one to replace it' : 'Drop a sample invoice here', 1)}<div class="muted" style="font-size:13px;margin-top:4px">Invoices follow this style. If it shows details we do not collect, we will ask you.</div></div>
+  <h2 style="margin:20px 0 6px">Business bank accounts</h2><div class="muted" style="font-size:13px;margin-bottom:10px">Add every account customers pay into. Only the last 4 digits are kept. A bank statement is accepted only if it shows one of these accounts, so a personal statement can never validate payments.</div>
+  <div id="accs">${(s.accounts || []).map((x, i) => accRow(x, i)).join('')}</div><button class="btn" type="button" id="addacc" style="margin-bottom:6px">+ Add a bank account</button>
   <h2 style="margin:20px 0 10px">Order IDs</h2>
   <div class="field"><label for="om">How are orders numbered?</label>${sel('om', [['own', 'I use my own order IDs (sales types them)'], ['auto', 'Create order IDs for me']], s.orderIdMode)}<div class="muted" style="font-size:13px;margin-top:4px">Every order also needs the customer's phone number. It lets sales find a customer's orders and warns about duplicates.</div></div>
   <h2 style="margin:20px 0 10px">Where records are kept</h2>
@@ -440,6 +446,10 @@ async function viewSettings() {
   <div class="err" id="serr" style="min-height:18px"></div><div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn p" type="submit">Save settings</button><button class="btn" type="button" data-act="testApi">Send a test call</button></div></div>
   <div class="card b"><h2 style="margin-bottom:10px">This workspace</h2><div style="display:flex;flex-direction:column;gap:8px"><div>Storage: <b>${S.health.db === 'supabase' ? 'Database connected' : 'Demo (temporary)'}</b></div><div>Screenshot reading: <b>${S.health.ocr ? 'On' : 'Off'}</b></div></div><p class="muted" style="font-size:13px;margin-top:14px">Approval rules, dashboard views and alerts you can set here today are the limits above. Setting them by chat is planned.</p></div></form>`,
     after() {
+      const accs = document.getElementById('accs');
+      document.getElementById('addacc').addEventListener('click', () => { accs.insertAdjacentHTML('beforeend', accRow({})); });
+      accs.addEventListener('click', e => { const b = e.target.closest('[data-rmacc]'); if (b) b.closest('[data-acc]').remove(); });
+      const readAccs = () => [...accs.querySelectorAll('[data-acc]')].map(r => { const g = f => r.querySelector(`[data-f=${f}]`).value.trim(); return { id: g('id'), name: g('name'), bank: g('bank'), last4: g('last4'), upi: g('upi').split(/[,\s]+/).filter(Boolean) }; }).filter(a => a.name || a.last4);
       const bn = document.getElementById('bn'); bn.addEventListener('change', () => { document.getElementById('bt').disabled = bn.checked; });
       let sampleId = s.invoiceSampleId || '';
       wireDrop('iz', async f => { try { const d = await downscale(f); const r = await api('POST', 'images', { dataUrl: d }); sampleId = r.id; document.querySelector('#iz b').textContent = 'Sample added. Save to keep it'; } catch (ex) { toast(ex.message, true); } });
@@ -447,7 +457,8 @@ async function viewSettings() {
         e.preventDefault(); const er = document.getElementById('serr'); er.textContent = '';
         const v = id => document.getElementById(id).value;
         try {
-          await api('PUT', 'settings', { businessName: v('bz'), onboarded: true, storage: v('st'), orderIdMode: v('om'), invoiceSampleId: sampleId,
+          if (!bn.checked && !v('bt').trim()) throw new Error('Enter your GST or tax number, or tick that it is not applicable');
+          await api('PUT', 'settings', { accounts: readAccs(), businessName: v('bz'), onboarded: true, storage: v('st'), orderIdMode: v('om'), invoiceSampleId: sampleId,
             business: { name: v('bz'), kind: v('bk'), industry: v('bi'), gstRate: v('bg'), taxId: v('bt'), taxNA: bn.checked, address: v('ba'), contact: v('bc') },
             customerFields: v('cf').split(',').map(x => ({ label: x.trim() })).filter(x => x.label),
             limits: { singlePayment: v('l1').replace(/,/g, ''), collectionThreshold: v('l2').replace(/,/g, '') },

@@ -232,6 +232,21 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
     let r0 = await call('POST', 'orders', { phone: '98765432', code: 'ph-1', customer: 'x', total: 1000, firstPayment: fpp('1') }, up); ok('9-digit phone is refused', r0.s === 400 && r0.j.badPhone === true, JSON.stringify(r0.j));
     r0 = await call('POST', 'orders', { phone: '987654321012', code: 'ph-2', customer: 'x', total: 1000, firstPayment: fpp('2') }, up); ok('12-digit phone without +91 is refused', r0.s === 400 && r0.j.badPhone === true, JSON.stringify(r0.j));
     r0 = await call('POST', 'orders', { phone: '+91 98765 43211', code: 'ph-3', customer: 'x', total: 1000, firstPayment: fpp('3') }, up); ok('+91 and 10 digits is accepted', r0.s === 200, JSON.stringify(r0.j)); }
+  { // business bank accounts: a statement must belong to one of them
+    const imgA = (await call('POST', 'images', { dataUrl: PNG }, up)).j.id;
+    let r0 = await call('PUT', 'settings', { accounts: [{ name: 'HDFC Current', bank: 'HDFC', last4: '4321', upi: ['Shop@okhdfcbank', 'bad id'] }, { name: 'ICICI Savings', bank: 'ICICI', last4: '9876' }] }, ow); ok('owner saves two business accounts', r0.s === 200, JSON.stringify(r0.j));
+    r0 = await call('PUT', 'settings', { accounts: [{ name: 'Bad', last4: '12' }] }, ow); ok('account without 4 digits is refused', r0.s === 400);
+    r0 = await call('GET', 'settings', null, mg); const accs = r0.j.settings.accounts || []; ok('manager sees the accounts (UPI IDs cleaned)', accs.length === 2 && accs.find(a => a.last4 === '4321').upi.join() === 'shop@okhdfcbank', JSON.stringify(r0.j.settings.accounts));
+    const hdfc = accs.find(a => a.last4 === '4321').id, icici = accs.find(a => a.last4 === '9876').id;
+    const o1 = await call('POST', 'orders', { phone: '9300000001', code: 'acct-1', customer: 'x', total: 3000, firstPayment: { mode: 'upi', amount: '3000', date: '2026-11-25T10:00', txnId: 'ACCT0001', imageId: imgA } }, up); await call('POST', 'orders/acct-1/approve', {}, ow);
+    const rows = [{ date: '2026-11-25', amount: 3000, ref: 'ACCT0001', desc: 'UPI' }];
+    r0 = await call('POST', 'statement', { rows }, mg); ok('statement without an account choice is refused', r0.s === 400 && r0.j.needAccount === true, JSON.stringify(r0.j));
+    r0 = await call('POST', 'statement', { rows, accountId: hdfc, headText: 'Account No: XXXXXXXX7777\nAccount Name: RAMESH PERSONAL' }, mg); ok('statement of a different account is refused', r0.s === 409 && r0.j.wrongAccount === true, JSON.stringify(r0.j));
+    r0 = await call('POST', 'statement', { rows, accountId: hdfc, headText: '' }, mg); ok('file that does not show the account needs a confirmation', r0.s === 409 && r0.j.needConfirm === true, JSON.stringify(r0.j));
+    r0 = await call('POST', 'statement', { rows, accountId: hdfc, headText: 'A/c No: XXXXXXXX4321', }, mg); ok('statement showing the right account validates the payment', r0.s === 200 && r0.j.matched.length === 1, JSON.stringify(r0.j));
+    r0 = await call('GET', 'summary?period=all&account=' + hdfc, null, mg); const inH = r0.j.received; r0 = await call('GET', 'summary?period=all&account=' + icici, null, mg); const inI = r0.j.received;
+    ok('summary can be limited to one account', inH >= 3000 && inI === 0, JSON.stringify([inH, inI]));
+    r0 = await call('PUT', 'settings', { accounts: [] }, ow); }
   console.log(bad ? '\n' + bad + ' FAILED' : '\nALL API TESTS PASSED');
   srv.close(); mock.close(); process.exit(bad ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

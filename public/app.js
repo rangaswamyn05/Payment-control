@@ -130,7 +130,7 @@ const periodName = m => m === 'all' ? 'all time' : /^\d{4}$/.test(m) ? m : month
 const monthName = m => { const x = /^(\d{4})-(\d{2})$/.exec(m); return x ? ['January','February','March','April','May','June','July','August','September','October','November','December'][+x[2]-1] + ' ' + x[1] : m; };
 async function viewDashboard(month) {
   month = month || new Date().toISOString().slice(0, 7);
-  const s = await api('GET', 'summary?period=' + month);
+  const s = await api('GET', 'summary?period=' + month + (S.acct && S.acct !== 'all' ? '&account=' + encodeURIComponent(S.acct) : ''));
   const kind = month === 'all' ? 'all' : /^\d{4}$/.test(month) ? 'year' : 'month';
   const yr = (month === 'all' ? new Date().toISOString().slice(0, 4) : month.slice(0, 4));
   const yrs = []; for (let y = +new Date().toISOString().slice(0, 4); y >= 2020; y--) yrs.push(y);
@@ -138,7 +138,7 @@ async function viewDashboard(month) {
   const tot = s.byStatus.verified + s.byStatus.awaiting + s.byStatus.flagged;
   const pc = v => tot ? Math.round(v * 100 / tot) : 0;
   const rows = s.top.map(o => `<a class="tr" href="#/orders/${encodeURIComponent(o.code)}"><div class="c1"><b>${esc(o.code)}</b><div class="muted" style="font-size:13px">${esc(o.customer)}</div></div><div class="c r">${inr(o.total)}</div><div class="c r">${inr(o.verified)}</div><div class="c r"><b>${inr(o.outstanding)}</b></div><div class="c">${orderBadge(o)}</div></a>`).join('');
-  return { active: '#/', html: `<div class="head"><div><h1>Dashboard</h1><div class="muted">Every payment, matched to an order and checked against the bank.</div></div><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><select id="pk" class="in" style="width:auto;min-height:44px" aria-label="View by"><option value="month"${kind === 'month' ? ' selected' : ''}>Month</option><option value="year"${kind === 'year' ? ' selected' : ''}>Year</option><option value="all"${kind === 'all' ? ' selected' : ''}>Overall</option></select>${kind === 'month' ? `<input id="mo" type="month" class="in" style="width:auto;min-height:44px" value="${esc(s.month)}" aria-label="Month">` : kind === 'year' ? `<select id="yr" class="in" style="width:auto;min-height:44px" aria-label="Year">${yrs.map(y => `<option${String(y) === month ? ' selected' : ''}>${y}</option>`).join('')}</select>` : ''}</div></div>
+  return { active: '#/', html: `<div class="head"><div><h1>Dashboard</h1><div class="muted">Every payment, matched to an order and checked against the bank.</div></div><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">${s.accounts && s.accounts.length ? `<select id="ac" class="in" style="width:auto;min-height:44px" aria-label="Bank account"><option value="all"${(S.acct || 'all') === 'all' ? ' selected' : ''}>All accounts</option>${s.accounts.map(a => `<option value="${esc(a.id)}"${S.acct === a.id ? ' selected' : ''}>${esc(a.name)} ····${esc(a.last4)}</option>`).join('')}<option value="cash"${S.acct === 'cash' ? ' selected' : ''}>Cash only</option><option value="unmatched"${S.acct === 'unmatched' ? ' selected' : ''}>Online, not yet matched to an account</option></select>` : ''}<select id="pk" class="in" style="width:auto;min-height:44px" aria-label="View by"><option value="month"${kind === 'month' ? ' selected' : ''}>Month</option><option value="year"${kind === 'year' ? ' selected' : ''}>Year</option><option value="all"${kind === 'all' ? ' selected' : ''}>Overall</option></select>${kind === 'month' ? `<input id="mo" type="month" class="in" style="width:auto;min-height:44px" value="${esc(s.month)}" aria-label="Month">` : kind === 'year' ? `<select id="yr" class="in" style="width:auto;min-height:44px" aria-label="Year">${yrs.map(y => `<option${String(y) === month ? ' selected' : ''}>${y}</option>`).join('')}</select>` : ''}</div></div>
   <div class="row" style="margin-bottom:16px">
    <div class="card kpi"><div class="l">Outstanding from clients</div><div class="v">${inr(s.outstanding)}</div><div class="muted">across ${s.openOrders} open order${s.openOrders === 1 ? '' : 's'}</div></div>
    <div class="card kpi"><div class="l">Validation</div><div class="v">${inr(s.validatedTotal)}</div><div class="muted">validated by statement · ${inr(s.manualTotal)} manually validated, not system validated · ${inr(s.notValidatedTotal)} validation pending</div></div>
@@ -151,6 +151,7 @@ async function viewDashboard(month) {
    <div class="muted" style="border-top:1px solid var(--line);margin-top:18px;padding-top:14px;font-size:13px">Cash needs the owner's approval. <a href="#/statement" style="color:var(--acc);font-weight:600">Upload a bank statement</a> to verify the amounts waiting.</div></div></div>`,
     after() {
       const set = v => { S.month = v; render(); };
+      const ac = document.getElementById('ac'); if (ac) ac.addEventListener('change', e => { S.acct = e.target.value; render(); });
       document.getElementById('pk').addEventListener('change', e => { const k = e.target.value; set(k === 'all' ? 'all' : k === 'year' ? yr : new Date().toISOString().slice(0, 7)); });
       const mo = document.getElementById('mo'); if (mo) mo.addEventListener('change', e => { if (e.target.value) set(e.target.value); });
       const ys = document.getElementById('yr'); if (ys) ys.addEventListener('change', e => set(e.target.value));
@@ -210,16 +211,16 @@ function guessCols(head) {
   return { date: find(/date/i), desc: find(/narration|description|particulars|remarks|details/i), ref: find(/ref|chq|cheque|utr|transaction id|txn/i), credit: find(/credit|deposit|\bcr\b/i), debit: find(/debit|withdraw|\bdr\b/i), amount: find(/^amount|amount\s*\(/i), type: find(/^type|cr\s*\/\s*dr|dr\s*\/\s*cr/i) };
 }
 async function viewStatement() {
-  S.st = S.st || null;
+  S.st = S.st || null; let accts = []; try { accts = ((await api('GET', 'settings')).settings.accounts) || []; } catch (e) {}
   return { active: '#/statement', html: `<div class="head"><div><h1>Bank statement check</h1><div class="muted">Drop a statement (CSV). Each online payment is matched by transaction ID and marked validated. Anything not found stays pending, never marked wrong.</div></div></div>
-  <div class="card"><div class="drop" id="sf" tabindex="0" role="button" aria-label="Drop the statement"><div class="di">⬇</div><div><b>Drop the bank statement here</b><div class="muted" style="font-size:13px">CSV file, or tap to choose</div></div><input type="file" accept=".csv,text/csv,text/plain" hidden></div><div class="muted" style="font-size:13px">Most banks let you download a statement as CSV or Excel. If you only have Excel, save it as CSV first. PDF is not supported yet.</div><div id="stbody"></div></div>`,
+  <div class="card"><div class="drop" id="sf" tabindex="0" role="button" aria-label="Drop the statement"><div class="di">⬇</div><div><b>Drop the bank statement here</b><div class="muted" style="font-size:13px">CSV file, or tap to choose</div></div><input type="file" accept=".csv,text/csv,text/plain" hidden></div><div class="muted" style="font-size:13px">Most banks let you download a statement as CSV or Excel. If you only have Excel, save it as CSV first. PDF is not supported yet.</div>${accts.length ? `<div class="field" style="margin-top:14px"><label for="sa">Which business account is this statement for?</label><select id="sa" class="in">${accts.length > 1 ? '<option value="">Choose…</option>' : ''}${accts.map(a => `<option value="${esc(a.id)}">${esc(a.name)} ····${esc(a.last4)}</option>`).join('')}</select><div class="muted" style="font-size:13px;margin-top:4px">The statement must show this account, or it is refused. A personal or another account never validates payments.</div></div>` : '<div class="note warn" style="margin-top:14px">No business bank account is set up. Ask the owner to add one in Settings so statements can be checked as yours.</div>'}<div id="stbody"></div></div>`,
     after() {
       const body = document.getElementById('stbody');
       const z = document.getElementById('sf'), zi = z.querySelector('input');
       z.addEventListener('click', () => zi.click()); zi.addEventListener('change', () => { if (zi.files[0]) load(zi.files[0]); });
       DROP.cur = f => load(f);
       async function load(f) {
-        const rows = parseCSV(await f.text());
+        const txt = await f.text(); S.stHead = txt.split(/\r?\n/).slice(0, 25).join('\n'); const rows = parseCSV(txt);
         let hi = rows.findIndex(r => r.some(c => /date/i.test(c)) && r.some(c => /credit|deposit|amount|cr\b/i.test(c)));
         if (hi < 0) { body.innerHTML = '<div class="note bad" style="margin-top:14px">Could not find the column headings. The file needs a Date column and a Credit (or Amount) column.</div>'; return; }
         const head = rows[hi].map(x => x.trim()), data = rows.slice(hi + 1); S.st = { head, data, cols: guessCols(head) };
@@ -246,7 +247,15 @@ async function viewStatement() {
         document.getElementById('runst').addEventListener('click', async ev => {
           ev.target.disabled = true; ev.target.textContent = 'Checking…';
           try {
-            const r = await api('POST', 'statement', { rows: cr });
+            const saEl = document.getElementById('sa'); let r;
+            try { r = await api('POST', 'statement', { rows: cr, accountId: saEl ? saEl.value : '', headText: S.stHead || '', confirmed: !!S.stOk }); }
+            catch (ex) {
+              ev.target.disabled = false; ev.target.textContent = 'Check payments against this statement';
+              const box = document.getElementById('stres');
+              if (ex.data && ex.data.needConfirm) { box.innerHTML = `<div class="note warn" style="margin-top:14px">${esc(ex.message)}<label style="display:block;margin-top:8px;font-weight:400"><input type="checkbox" id="stok" style="width:18px;height:18px;vertical-align:-3px;margin-right:8px">Yes, this is that business account's statement</label></div>`; document.getElementById('stok').addEventListener('change', e => { S.stOk = e.target.checked; }); }
+              else box.innerHTML = `<div class="note bad" style="margin-top:14px">${esc(ex.message)}</div>`;
+              return;
+            }
             document.getElementById('stres').innerHTML = `<div style="margin-top:18px"><h2>Result</h2><div class="row" style="margin:10px 0"><div class="card kpi"><div class="l">Validated</div><div class="v" style="color:var(--good)">${r.matched.length}</div><div class="muted">matched to a bank credit</div></div><div class="card kpi"><div class="l">Still pending</div><div class="v">${r.flagged.length}</div><div class="muted">unable to validate with this statement. Provide another statement.</div></div><div class="card kpi"><div class="l">Credits with no payment record</div><div class="v">${r.unmatchedCredits.length}</div><div class="muted">money in the bank nobody logged</div></div></div>
             ${r.unmatchedCredits.length ? `<h2 style="margin:12px 0 6px">Bank credits with no payment record</h2><div class="tbl"><div class="tr h" style="min-width:560px"><div class="c">Date</div><div class="c r">Amount</div><div class="c1">Narration</div></div>${r.unmatchedCredits.map(x => `<div class="tr" style="min-width:560px"><div class="c">${esc(fdate(x.date))}</div><div class="c r"><b>${inr(x.amount)}</b></div><div class="c1 muted">${esc(x.desc || x.ref)}</div></div>`).join('')}</div>` : ''}
             ${r.untouched ? `<p class="muted">${r.untouched} payment(s) fall outside this statement's dates and were left unchanged.</p>` : ''}<p><a href="#/review" style="color:var(--acc);font-weight:600">Go to Review</a></p></div>`;

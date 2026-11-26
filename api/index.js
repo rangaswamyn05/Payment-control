@@ -167,6 +167,7 @@ async function getSettings() {
     business: { name: '', taxId: '', taxNA: false, address: '', contact: '', gstRate: '', kind: '', industry: '', ...(s.business || {}) },
     customerFields: Array.isArray(s.customerFields) ? s.customerFields : [],
     limits: { singlePayment: 0, collectionThreshold: 0, ...(s.limits || {}) },
+    accounts: (Array.isArray(s.accounts) ? s.accounts : []).slice(0, 10).map(a => ({ id: String(a.id || ''), name: String(a.name || ''), bank: String(a.bank || ''), last4: String(a.last4 || ''), upi: (Array.isArray(a.upi) ? a.upi : []).map(x => String(x).trim().toLowerCase()).filter(x => /^[\w.\-]{2,}@[a-z]{2,}$/.test(x)).slice(0, 5) })).filter(a => a.id && a.name && /^\d{4}$/.test(a.last4)),
     onboarded: !!s.onboarded, invoiceSampleId: s.invoiceSampleId || '', lastExportAt: s.lastExportAt || '', lastExportById: s.lastExportById || '',
   };
 }
@@ -376,7 +377,7 @@ async function route(req, res) {
       const api = s.connectors.api;
       const base = { businessName: s.businessName, onboarded: s.onboarded, orderIdMode: s.orderIdMode, customerFields: s.customerFields, business: { name: s.business.name, taxNA: s.business.taxNA } };
       if (RANK[me.role] < RANK.manager) return send(res, 200, { settings: base });
-      return send(res, 200, { settings: { ...base, managerEmails: s.managerEmails, storage: s.storage, business: s.business, limits: s.limits, lastExportAt: s.lastExportAt, connectors: { api: { enabled: !!api.enabled, url: me.role === 'owner' ? api.url || '' : '', keySet: !!api.key } } } });
+      return send(res, 200, { settings: { ...base, managerEmails: s.managerEmails, storage: s.storage, business: s.business, limits: s.limits, accounts: s.accounts, lastExportAt: s.lastExportAt, connectors: { api: { enabled: !!api.enabled, url: me.role === 'owner' ? api.url || '' : '', keySet: !!api.key } } } });
     }
     if (m === 'PUT') {
       const me = await authed(req, url, 'owner');
@@ -397,6 +398,7 @@ async function route(req, res) {
         storage: STORAGE.includes(body.storage) ? body.storage : cur.storage,
         orderIdMode: body.orderIdMode === 'auto' || body.orderIdMode === 'own' ? body.orderIdMode : cur.orderIdMode,
         business: biz, customerFields: cf,
+        accounts: (() => { const inp = Array.isArray(body.accounts) ? body.accounts : cur.accounts; return inp.slice(0, 10).map(a => { const last4 = String(a.last4 || '').replace(/\D/g, ''); if (String(a.name || '').trim() && !/^\d{4}$/.test(last4)) throw new HttpErr(400, 'Enter the last 4 digits of the account number for ' + String(a.name).trim()); return { id: String(a.id || '').replace(/[^\w]/g, '').slice(0, 20) || 'acc_' + Math.random().toString(36).slice(2, 8), name: String(a.name || '').trim().slice(0, 40), bank: String(a.bank || '').trim().slice(0, 40), last4, upi: (Array.isArray(a.upi) ? a.upi : String(a.upi || '').split(/[,\s]+/)).map(x => String(x).trim().toLowerCase()).filter(x => /^[\w.\-]{2,}@[a-z]{2,}$/.test(x)).slice(0, 5) }; }).filter(a => a.name); })(),
         limits: { singlePayment: Math.max(0, r2(lm.singlePayment) || 0), collectionThreshold: Math.max(0, r2(lm.collectionThreshold) || 0) },
         onboarded: body.onboarded !== undefined ? !!body.onboarded : cur.onboarded, invoiceSampleId: body.invoiceSampleId !== undefined ? String(body.invoiceSampleId).slice(0, 40) : cur.invoiceSampleId, lastExportAt: cur.lastExportAt, lastExportById: cur.lastExportById,
       };
@@ -836,12 +838,14 @@ async function route(req, res) {
     const pays = await db.all('payments');
     const views = orders.map(o => orderView(o, pays));
     const open = views.filter(o => o.status === 'open');
-    const inMonth = pays.filter(p => (month === 'all' || (p.date || '').startsWith(month)) && p.status !== 'rejected');
+    const acctSel = url.searchParams.get('account') || 'all';
+    const inAcct = p => acctSel === 'all' || (acctSel === 'cash' ? p.mode === 'cash' : acctSel === 'unmatched' ? (p.mode !== 'cash' && !p.accountId) : p.accountId === acctSel);
+    const inMonth = pays.filter(p => (month === 'all' || (p.date || '').startsWith(month)) && p.status !== 'rejected' && inAcct(p));
     const cnt = inMonth.filter(p => p.status !== 'flagged');
     const sum = f => r2(inMonth.filter(f).reduce((s, p) => s + p.amount, 0));
-    const live = pays.filter(p => p.status !== 'rejected');
+    const live = pays.filter(p => p.status !== 'rejected' && inAcct(p));
     return send(res, 200, {
-      month,
+      month, account: acctSel, accounts: (await getSettings()).accounts,
       outstanding: r2(open.reduce((s, o) => s + o.outstanding, 0)),
       outstandingVerifiedOnly: r2(open.reduce((s, o) => s + o.outstandingVerified, 0)),
       pendingOrders: views.filter(o => o.status === 'pending').length,
@@ -867,6 +871,20 @@ async function route(req, res) {
     const body = await readBody(req);
     const rows = (Array.isArray(body.rows) ? body.rows : []).map(r => ({ date: String(r.date || '').slice(0, 10), amount: r2(r.amount), ref: String(r.ref || '').slice(0, 120), desc: String(r.desc || '').slice(0, 200) })).filter(r => /^\d{4}-\d{2}-\d{2}$/.test(r.date) && r.amount > 0);
     if (!rows.length) throw new HttpErr(400, 'No credits found in that statement');
+    // Whose account is this? The owner lists the business accounts in Settings; each statement must be for one of them.
+    const stSettings = await getSettings(); let acct = null, acctProof = '';
+    if (stSettings.accounts.length) {
+      acct = stSettings.accounts.find(x => x.id === body.accountId) || (stSettings.accounts.length === 1 ? stSettings.accounts[0] : null);
+      if (!acct) throw new HttpErr(400, 'Choose which business account this statement is for', { needAccount: true });
+      const head = String(body.headText || '').slice(0, 6000), low = head.toLowerCase();
+      const shows = [...head.matchAll(/(?:a\/c|acct|account)[^\n\d]{0,30}((?:[\dXx*•\-\s]){6,24})/gi)].map(m => m[1].replace(/\D/g, '')).filter(d => d.length >= 4);
+      const endsRight = new RegExp('(?:^|\\D)[\\dXx*•]{0,20}' + acct.last4 + '(?!\\d)').test(head);
+      const nameShown = acct.name.length >= 4 && low.includes(acct.name.toLowerCase());
+      if (shows.length && !shows.some(d => d.endsWith(acct.last4)) && !endsRight && !nameShown) throw new HttpErr(409, `This statement shows a different account (ending ${shows[0].slice(-4)}), not ${acct.name} ending ${acct.last4}. It may be a personal or another account. Nothing was marked validated.`, { wrongAccount: true });
+      if (endsRight || nameShown) acctProof = 'the account ending ' + acct.last4 + ' is shown on the statement';
+      else if (body.confirmed === true) acctProof = 'confirmed by ' + me.name + ' (the file does not show the account)';
+      else throw new HttpErr(409, `This file does not show which account it is for. Tick the box to confirm it is ${acct.name} ending ${acct.last4}.`, { needConfirm: true });
+    }
     if (rows.length > 5000) throw new HttpErr(400, 'Statement is too large. Upload one month at a time.');
     const dates = rows.map(r => r.date).sort();
     const from = dates[0], to = dates[dates.length - 1];
@@ -882,7 +900,7 @@ async function route(req, res) {
     for (const p of sorted) { if (p._m) continue; const i = findRow(p, false); if (i >= 0) { used.add(i); p._m = { i, how: 'amount and date' }; } }
     for (const p of sorted) {
       if (p._m) {
-        await db.update('payments', p.id, { status: 'verified', reason: '', verifyMethod: 'statement', stmtUnableAt: '', verifiedBy: me.name, verifiedAt: new Date().toISOString(), verifyNote: 'Matched on ' + p._m.how + ' with statement credit dated ' + rows[p._m.i].date });
+        await db.update('payments', p.id, { ...(acct ? { accountId: acct.id } : {}), status: 'verified', reason: '', verifyMethod: 'statement', stmtUnableAt: '', verifiedBy: me.name, verifiedAt: new Date().toISOString(), verifyNote: 'Matched on ' + p._m.how + ' with statement credit dated ' + rows[p._m.i].date });
         await audit(me, 'payment_verified_statement', 'payment', p.id, `${p.orderCode} ${p.amount} matched on ${p._m.how}`);
         matched.push({ id: p.id, orderCode: p.orderCode, amount: p.amount, how: p._m.how });
         await runConnectors('verified', { ...p, status: 'verified' }, allOrders.find(o => o.code === p.orderCode) || { code: p.orderCode }, me);
