@@ -38,17 +38,28 @@ function payFields(P) {
   <div class="muted" style="font-size:13px;margin-bottom:6px">Date: ${esc(P.date || P.today)} ${P.date ? '(read from the screenshot)' : '(today; the screenshot date is used when it can be read)'}</div>` : ''}`;
 }
 function wirePay(P, redraw) {
-  document.querySelectorAll('[data-p]').forEach(el => el.addEventListener('input', () => { P[el.dataset.p] = el.value; }));
+  document.querySelectorAll('[data-p]').forEach(el => el.addEventListener('input', () => { P[el.dataset.p] = el.value; if (el.dataset.p === 'amount') P.amtOk = true; }));
+  document.querySelectorAll('[data-amt]').forEach(b => b.addEventListener('click', () => { P.amount = b.dataset.amt; P.amtOk = true; redraw(); }));
   document.querySelectorAll('[data-pmode]').forEach(b => b.addEventListener('click', () => { P.mode = b.dataset.pmode; redraw(); }));
-  const c = document.querySelector('[data-pclear]'); if (c) c.addEventListener('click', () => { P.imageId = ''; P.preview = ''; P.ocrMsg = ''; redraw(); });
+  const c = document.querySelector('[data-pclear]'); if (c) c.addEventListener('click', () => { P.imageId = ''; P.preview = ''; P.ocrMsg = ''; P.amtAlts = []; P.amtOk = false; redraw(); });
   const onFile = f => readShot(P, f, redraw);
   if (document.getElementById('pz')) wireDrop('pz', onFile); else DROP.cur = onFile;
 }
 // Reads the words in a picture inside the browser (free, no key). Used when the server has no Vision key.
 async function browserRead(dataUrl) {
   if (!window.Tesseract) await new Promise((ok, no) => { const sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js'; sc.onload = ok; sc.onerror = () => no(new Error('reader not loaded')); document.head.appendChild(sc); });
-  const r = await window.Tesseract.recognize(dataUrl, 'eng');
-  return (r && r.data && r.data.text) || '';
+  // Make the picture easier to read: bigger, grey, dark screens flipped to dark-on-light, contrast stretched.
+  const img = await new Promise((ok, no) => { const im = new Image(); im.onload = () => ok(im); im.onerror = () => no(new Error('image not readable')); im.src = dataUrl; });
+  const k = Math.min(2, 2600 / Math.max(img.width, img.height)), c = document.createElement('canvas');
+  c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+  const g = c.getContext('2d'); g.drawImage(img, 0, 0, c.width, c.height);
+  const d = g.getImageData(0, 0, c.width, c.height), px = d.data; let sum = 0, lo = 255, hi = 0;
+  for (let i = 0; i < px.length; i += 4) { const y = (px[i] * 299 + px[i + 1] * 587 + px[i + 2] * 114) / 1000; px[i] = y; sum += y; if (y < lo) lo = y; if (y > hi) hi = y; }
+  const dark = sum / (px.length / 4) < 110, span = Math.max(1, hi - lo);
+  for (let i = 0; i < px.length; i += 4) { let y = (px[i] - lo) * 255 / span; if (dark) y = 255 - y; px[i] = px[i + 1] = px[i + 2] = y; }
+  g.putImageData(d, 0, 0);
+  const w = await window.Tesseract.createWorker('eng');
+  try { await w.setParameters({ tessedit_pageseg_mode: '11' }); const r = await w.recognize(c); return (r && r.data && r.data.text) || ''; } finally { try { await w.terminate(); } catch (e) { /* ignore */ } }
 }
 async function ocrAny(imageId, dataUrl, kind) {
   const r = await api('POST', 'ocr', { imageId, kind });
@@ -72,6 +83,7 @@ async function readShot(P, file, redraw) {
     else {
       const p = r.parsed;
       if (p.amount) P.amount = String(p.amount);
+      P.amtAlts = p.amountUnsure && p.amount ? [p.amount, p.altAmount].filter(Boolean) : []; P.amtOk = false;
       if (p.date) { P.date = p.date; P.time = p.time || ''; }
       if (p.txnId) P.txnId = p.txnId;
       if (p.payer) P.payer = p.payer; if (p.payee) P.payee = p.payee;
@@ -84,6 +96,7 @@ async function readShot(P, file, redraw) {
 }
 function payCheck(P) {
   if (!(Number(String(P.amount).replace(/,/g, '')) > 0)) return 'Enter the amount.';
+  if (P.amtAlts && P.amtAlts.length && !P.amtOk) return 'Confirm the amount first: tap the right one above.';
     if (P.mode !== 'cash' && !P.imageId) return 'Add the payment screenshot.';
   if (P.mode !== 'cash' && !String(P.txnId).trim()) return (P.mode === 'cheque' ? 'No cheque number. Type it from the photo, or use a photo that shows it.' : P.mode === 'card' ? 'No payment ID. Type it from the receipt, or use a screenshot that shows it.' : 'No transaction ID. Type it from the screenshot, or use a screenshot that shows it.');
   return '';

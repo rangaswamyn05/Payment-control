@@ -50,6 +50,7 @@ function findAmounts(text) {
   let m;
   while ((m = re.exec(text))) { const n = toNum(m[1]); if (n > 0) out.push(n); }
   if (out.length) return out;
+  out.unsure = true; // no rupee sign found: the number may carry a misread sign (₹5,000 read as 25,000)
   // OCR sometimes drops the rupee sign: use a line that is only a number
   for (const l of text.split(/\n/)) {
     const mm = /^\s*\+?\s*([0-9][0-9,]*(?:\.\d{1,2})?)\s*$/.exec(l);
@@ -58,7 +59,7 @@ function findAmounts(text) {
   if (out.length) return out;
   // the rupee sign is often read as a stray symbol or letter (% ¥ € Z = ?): accept that in front of a lone amount
   for (const l of text.split(/\n/)) {
-    const mm = /^\s*[%¥€=?*zZ2]\s*([0-9][0-9,]*(?:\.\d{1,2})?)\s*$/.exec(l);
+    const mm = /^\s*(?:[^\w\s.,]|[zZ])\s*([0-9][0-9,]*(?:\.\d{1,2})?)\s*$/.exec(l);
     if (mm && mm[1].replace(/[,.]/g, '').length <= 9) { const n = toNum(mm[1]); if (n > 0) out.push(n); }
   }
   return out;
@@ -95,6 +96,7 @@ function parseUpi(raw) {
 
   const amts = findAmounts(text);
   if (amts.length) out.amount = amts[0];
+  if (amts.length && amts.unsure) { out.amountUnsure = true; const st = String(out.amount); if (st.length > 1 && st[0] === '2' && Number(st.slice(1)) > 0) out.altAmount = Number(st.slice(1)); }
   out.candidates = [...new Set(amts)].slice(0, 5);
 
   const d = parseDate(flat);
