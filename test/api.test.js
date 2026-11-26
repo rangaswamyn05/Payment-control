@@ -226,6 +226,8 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
     r0 = await call('GET', 'orders', null, ow); const co = (r0.j.orders || []).find(o => o.code === 'close-1');
     ok('order closes by itself once the last payment is validated', co && co.status === 'closed', JSON.stringify(co && co.status));
   }
+  { const r0 = await call('POST', 'ocr', { text: 'Completed\n\u20b95,000\nRemarks: advance for DEMO-1001\nUPI transaction ID\n632912345678' }, up);
+    ok('screenshot remark naming an open order is matched to it', r0.s === 200 && r0.j.parsed && r0.j.parsed.orderMatches && r0.j.parsed.orderMatches.includes('DEMO-1001'), JSON.stringify(r0.j)); }
   console.log(bad ? '\n' + bad + ' FAILED' : '\nALL API TESTS PASSED');
   srv.close(); mock.close(); process.exit(bad ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

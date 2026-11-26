@@ -13,7 +13,7 @@ for (const c of cases) {
     res.push(['schedule', ok]);
   } else {
     const p = parseUpi(c.text), e = c.expect;
-    for (const f of ['amount', 'txnId', 'date', 'phone']) {
+    for (const f of ['amount', 'txnId', 'date', 'phone', 'orderHint']) {
       if (!(f in e)) continue;
       let ok;
       if (f === 'amount' && e.amountOptions) ok = e.amountOptions.includes(p.amount) && p.amount !== null && (p.altAmount === e.amount || p.amount === e.amount); // right answer is offered

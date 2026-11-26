@@ -441,9 +441,22 @@ async function route(req, res) {
   if (a === 'ocr' && m === 'POST') {
     const me = await authed(req, url, 'uploader');
     const body = await readBody(req);
+    // which existing orders does the screenshot mention (order ID in the remark, or the customer's phone)?
+    const mentions = async (parsed, text) => {
+      if (!parsed || body.kind === 'plan') return parsed;
+      try {
+        const orders = await db.all('orders');
+        const hay = ' ' + String(text).toUpperCase().replace(/[^A-Z0-9-]+/g, ' ') + ' ';
+        const hit = new Set(orders.filter(o => o.code && hay.includes(' ' + String(o.code).toUpperCase() + ' ')).map(o => o.code));
+        if (parsed.orderHint) orders.filter(o => String(o.code).toUpperCase() === parsed.orderHint).forEach(o => hit.add(o.code));
+        if (parsed.phone) orders.filter(o => o.phone && digits(o.phone).endsWith(parsed.phone.slice(-10))).forEach(o => hit.add(o.code));
+        parsed.orderMatches = [...hit].slice(0, 5);
+      } catch (e) { /* hints only */ }
+      return parsed;
+    };
     if (typeof body.text === 'string' && body.text.trim()) { // text already read in the browser (no key needed)
       const t = body.text.slice(0, 20000);
-      return send(res, 200, { configured: true, source: 'browser', rawText: t.slice(0, 1500), parsed: body.kind === 'plan' ? { schedule: parseSchedule(t) } : parseUpi(t) });
+      return send(res, 200, { configured: true, source: 'browser', rawText: t.slice(0, 1500), parsed: body.kind === 'plan' ? { schedule: parseSchedule(t) } : await mentions(parseUpi(t), t) });
     }
     const img = await db.get('images', body.imageId);
     if (!img || (RANK[me.role] < RANK.manager && img.createdBy !== me.id)) throw new HttpErr(404, 'Image not found');
@@ -458,7 +471,7 @@ async function route(req, res) {
     const resp = (j.responses || [])[0] || {};
     const text = (resp.fullTextAnnotation && resp.fullTextAnnotation.text) || (resp.textAnnotations && resp.textAnnotations[0] && resp.textAnnotations[0].description) || '';
     if (!text) return send(res, 200, { configured: true, error: 'No text found in the image. Enter the details by hand.' });
-    return send(res, 200, { configured: true, parsed: body.kind === 'plan' ? { schedule: parseSchedule(text) } : parseUpi(text) });
+    return send(res, 200, { configured: true, rawText: text.slice(0, 1500), parsed: body.kind === 'plan' ? { schedule: parseSchedule(text) } : await mentions(parseUpi(text), text) });
   }
 
   // ----- orders

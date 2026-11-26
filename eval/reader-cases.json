@@ -156,5 +156,17 @@
    "date": "2026-11-25",
    "phone": null
   }
+ },
+ {
+  "id": "R14",
+  "app": "GPay (remark)",
+  "note": "remark carries an order ID and the customer's phone",
+  "text": "Completed\n₹5,000\nPaid to Studio\nUPI transaction ID\n632912345678\nRemarks: Order DEMO-1001 advance 9876543210\n25 Nov 2026, 2:11 PM",
+  "expect": {
+   "amount": 5000,
+   "txnId": "632912345678",
+   "phone": "9876543210",
+   "orderHint": "DEMO-1001"
+  }
  }
 ]

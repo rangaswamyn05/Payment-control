@@ -100,6 +100,17 @@ function parseUpi(raw) {
   out.candidates = [...new Set(amts)].slice(0, 5);
   { const pm = /(?:^|[^\d])(?:\+?91[\s-]?)?([6-9]\d{4}[\s-]?\d{5})(?!\d)/.exec(text.replace(/\S*@\S*/g, ' ').replace(/XXXX\d+/gi, '')); if (pm) out.phone = pm[1].replace(/\D/g, ''); }
 
+  // Remark / comment the payer typed, and an order ID written in it ("Order DEMO-1001", "Advance for ORD-45")
+  {
+    for (let i = 0; i < lines.length && !out.note; i++) {
+      const m = /^(?:payment\s+)?(remarks?|note|message|comment|description|narration)\s*[:\-]?\s*(.*)$/i.exec(lines[i]);
+      if (m) { const v = (m[2] || lines[i + 1] || '').trim(); if (v && !/^(remarks?|note|message|comment)$/i.test(v)) out.note = v.slice(0, 120); }
+    }
+    const pool = (out.note ? out.note + '\n' : '') + text;
+    const om = /\border\s*(?:id|no\.?|number|#)?\s*[:#\-]?\s*([A-Za-z]{0,6}-?\d{2,10}(?:-\d{1,6})?)/i.exec(pool) || (out.note ? /(?:^|[\s#])([A-Za-z]{2,6}-\d{2,10})(?=$|[\s.,])/.exec(out.note) : null);
+    if (om) out.orderHint = om[1].toUpperCase();
+  }
+
   const d = parseDate(flat);
   if (d) { out.date = d.date; out.time = d.time; }
 
