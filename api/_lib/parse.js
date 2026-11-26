@@ -144,4 +144,28 @@ function parseUpi(raw) {
   return out;
 }
 
-module.exports = { parseUpi, parseDate, findAmounts };
+
+// A quotation or Excel screenshot listing instalments: rows of a due date and an amount.
+function parseSchedule(text) {
+  const MONRE = '(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)';
+  const strip = l => l
+    .replace(/\d{4}-\d{2}-\d{2}/g, ' ')
+    .replace(/\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{4}/g, ' ')
+    .replace(new RegExp('\\d{1,2}(?:st|nd|rd|th)?[\\s\\-\\/,]+' + MONRE + '[a-z]*[\\s\\-\\/,]+\\d{4}', 'ig'), ' ')
+    .replace(new RegExp(MONRE + '[a-z]*\\s+\\d{1,2}(?:st|nd|rd|th)?,?\\s+\\d{4}', 'ig'), ' ');
+  const amountIn = l => {
+    let found = 0, m; const re = /(₹|₹|Rs\.?|INR)?\s*([0-9][0-9,]*(?:\.\d{1,2})?)/gi;
+    while ((m = re.exec(strip(l)))) { const n = toNum(m[2]); if (n > 0 && (m[1] || n >= 100)) found = n; }
+    return found;
+  };
+  const lines = String(text || '').split(/\n/).map(l => l.trim()).filter(Boolean);
+  const rows = [];
+  for (const l of lines) { const d = parseDate(l); const a = d ? amountIn(l) : 0; if (d && a) rows.push({ date: d.date, amount: a }); }
+  if (rows.length) return rows;
+  // columns read one after another: all the dates, then all the amounts
+  const dates = lines.map(l => parseDate(l)).filter(Boolean).map(d => d.date);
+  const amts = lines.filter(l => !parseDate(l)).map(l => amountIn(l)).filter(n => n > 0);
+  return dates.length && dates.length === amts.length ? dates.map((date, i) => ({ date, amount: amts[i] })) : [];
+}
+
+module.exports = { parseUpi, parseDate, findAmounts, parseSchedule };

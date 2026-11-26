@@ -2,7 +2,7 @@
 // One serverless function handles every /api/* route (keeps us inside Vercel's free function limit).
 const db = require('./_lib/db');
 const A = require('./_lib/auth');
-const { parseUpi } = require('./_lib/parse');
+const { parseUpi, parseSchedule } = require('./_lib/parse');
 const { dispatch, dispatchOrder, validateUrl } = require('./_lib/connectors');
 
 const RANK = { uploader: 1, manager: 2, owner: 3 };
@@ -91,6 +91,33 @@ function payNote(p) {
   return '';
 }
 
+const todayIST = () => new Date(Date.now() + 19800000).toISOString().slice(0, 10);
+const isDay = d => /^\d{4}-\d{2}-\d{2}$/.test(d) && !isNaN(Date.parse(d + 'T00:00:00Z'));
+// Optional payment plan on an order: either a full instalment schedule or just the next due date.
+function parseDue(body, total) {
+  const out = {};
+  if (Array.isArray(body.schedule) && body.schedule.length) {
+    if (body.schedule.length > 24) throw new HttpErr(400, 'Up to 24 instalments');
+    const rows = body.schedule.map(r => ({ date: String((r && r.date) || ''), amount: r2(r && r.amount) }));
+    if (rows.some(r => !isDay(r.date) || !(r.amount > 0))) throw new HttpErr(400, 'Each instalment needs a date and an amount');
+    if (r2(rows.reduce((s, r) => s + r.amount, 0)) > total + 0.005) throw new HttpErr(400, 'The instalments add up to more than the order total');
+    out.schedule = rows.sort((a, b) => a.date.localeCompare(b.date));
+  } else if (body.nextDue) {
+    if (!isDay(String(body.nextDue))) throw new HttpErr(400, 'Enter the next payment due date');
+    out.nextDue = String(body.nextDue);
+  }
+  return out;
+}
+// What the salesperson should chase next: first instalment not yet covered, or the single due date.
+function dueInfo(o, collected, outstanding) {
+  if (!(outstanding > 0.005)) return null;
+  let date = '', amount = outstanding;
+  if (Array.isArray(o.schedule) && o.schedule.length) {
+    let cum = 0;
+    for (const r of o.schedule) { cum = r2(cum + r.amount); if (cum > collected + 0.005) { date = r.date; amount = r2(cum - collected); break; } }
+  } else if (o.nextDue) date = o.nextDue;
+  return date ? { date, amount, overdue: date < todayIST() } : null;
+}
 function orderView(o, allPays) {
   const pays = allPays.filter(p => p.orderCode === o.code);
   const s = sums(pays);
@@ -412,7 +439,7 @@ async function route(req, res) {
     const resp = (j.responses || [])[0] || {};
     const text = (resp.fullTextAnnotation && resp.fullTextAnnotation.text) || (resp.textAnnotations && resp.textAnnotations[0] && resp.textAnnotations[0].description) || '';
     if (!text) return send(res, 200, { configured: true, error: 'No text found in the image. Enter the details by hand.' });
-    return send(res, 200, { configured: true, parsed: parseUpi(text) });
+    return send(res, 200, { configured: true, parsed: body.kind === 'plan' ? { schedule: parseSchedule(text) } : parseUpi(text) });
   }
 
   // ----- orders
@@ -422,7 +449,7 @@ async function route(req, res) {
       const o = (await db.all('orders')).find(x => lc(x.code) === lc(c));
       if (!o) throw new HttpErr(404, 'No order with that ID');
       const n = (await db.all('payments')).filter(p => p.orderCode === o.code && p.status !== 'rejected').length;
-      return send(res, 200, { code: o.code, customer: o.customer, total: o.total, closed: o.status === 'closed', pending: o.status === 'pending', rejected: o.status === 'rejected', nextPayment: n + 1 });
+      return send(res, 200, { code: o.code, customer: o.customer, total: o.total, closed: o.status === 'closed', pending: o.status === 'pending', rejected: o.status === 'rejected', nextPayment: n + 1, hasPlan: !!(o.schedule && o.schedule.length) });
     }
     if (b === 'by-phone' && c && m === 'GET') {
       await authed(req, url, 'uploader');
@@ -434,7 +461,8 @@ async function route(req, res) {
     if (b === 'mine' && m === 'GET') {
       const me = await authed(req, url, 'uploader');
       const list = (await db.all('orders')).filter(o => o.createdById === me.id).reverse();
-      return send(res, 200, { orders: list.map(o => ({ code: o.code, customer: o.customer, total: o.total, status: o.status, rejectReason: o.rejectReason || '', customerExtra: o.customerExtra || {}, modifications: o.modifications || [] })) });
+      const allPays = await db.all('payments');
+      return send(res, 200, { orders: list.map(o => { const v = orderView(o, allPays); return { collected: v.collected, outstanding: v.outstanding, due: dueInfo(o, v.collected, v.outstanding), code: o.code, customer: o.customer, total: o.total, status: o.status, rejectReason: o.rejectReason || '', customerExtra: o.customerExtra || {}, modifications: o.modifications || [] }; }) });
     }
     const resubmitting = c === 'resubmit' && m === 'POST';
     const me = await authed(req, url, (!b && m === 'POST') || resubmitting ? 'uploader' : 'manager');
@@ -472,9 +500,12 @@ async function route(req, res) {
       const customerExtra = readExtra(body.customerExtra, {});
       const isMgr = RANK[me.role] >= RANK.manager;
       if (!body.firstPayment && !isMgr) throw new HttpErr(400, 'Add the first advance payment screenshot with the order');
+      const due = parseDue(body, total);
+      const firstAmt = body.firstPayment ? r2(body.firstPayment.amount) : 0;
+      if (!due.schedule && !due.nextDue && r2(total - firstAmt) > 0.005) throw new HttpErr(400, 'Add the payment plan (a screenshot with the dates and amounts) or the next payment due date', { needDue: true });
       let first = null;
       if (body.firstPayment) first = await addPayment(me, { code, status: 'pending' }, { ...body.firstPayment, seq: 1 }, { first: true });
-      const o = await db.insert('orders', { code, customer: String(body.customer).trim().slice(0, 80), total, status: isMgr ? 'open' : 'pending', note: String(body.note || '').slice(0, 200), createdBy: me.name, createdById: me.id, customerExtra, phone: String(body.phone).trim().slice(0, 20) });
+      const o = await db.insert('orders', { code, customer: String(body.customer).trim().slice(0, 80), total, status: isMgr ? 'open' : 'pending', note: String(body.note || '').slice(0, 200), createdBy: me.name, createdById: me.id, customerExtra, phone: String(body.phone).trim().slice(0, 20), ...due });
       await audit(me, 'order_created', 'order', o.code, `${o.customer}, total ${o.total}${o.status === 'pending' ? ', waiting for approval' : ''}`);
       if (o.status === 'open') await afterApprove(me, o, settings);
       else await notify('role:manager', `New order ${o.code} (${o.customer}, ${inr(o.total)}) is waiting for approval.`, o.code);
@@ -599,7 +630,12 @@ async function route(req, res) {
       if (order.status === 'closed') throw new HttpErr(400, 'That order is closed.');
       if (order.status === 'pending') throw new HttpErr(400, 'That order is waiting for manager approval.');
       if (order.status === 'rejected') throw new HttpErr(400, 'That order was sent back. Fix it and send it again first.');
+      const v0 = orderView(order, await db.all('payments'));
+      const hasPlan = !!(order.schedule && order.schedule.length);
+      if (!hasPlan && !body.nextDue && r2(order.total - v0.collected - r2(body.amount)) > 0.005) throw new HttpErr(400, 'Add the next payment due date', { needDue: true });
+      const newDue = body.nextDue && !(order.schedule && order.schedule.length) && (order.createdById === me.id || RANK[me.role] >= RANK.manager) ? parseDue({ nextDue: body.nextDue }, order.total) : null;
       const { p, notice } = await addPayment(me, order, body);
+      if (newDue) await db.update('orders', order.id, newDue);
       return send(res, 200, { payment: { id: p.id, orderCode: p.orderCode, amount: p.amount, mode: p.mode, seq: p.seq, flagged: p.status === 'flagged', needsOwner: p.approval === 'pending_owner' }, notice });
     }
     const me = await authed(req, url, 'manager');

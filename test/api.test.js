@@ -5,6 +5,7 @@ const { start } = require('./serve');
 let bad = 0, base;
 const ok = (name, cond, extra) => { if (!cond) bad++; console.log((cond ? 'PASS ' : 'FAIL ') + name + (cond ? '' : '  ' + (extra || ''))); };
 async function call(method, path, body, tok) {
+  if (method === 'POST' && (path === 'payments' || path === 'orders') && body && !body.nextDue && !body.schedule) { const { noDue, ...rest } = body; body = noDue ? rest : { ...rest, nextDue: '2030-01-01' }; }
   const r = await fetch(base + '/api/' + path, { method, headers: { 'Content-Type': 'application/json', ...(tok ? { Authorization: 'Bearer ' + tok } : {}) }, body: body ? JSON.stringify(body) : undefined });
   let j = {}; try { j = await r.json(); } catch (e) {}
   return { s: r.status, j };
@@ -54,6 +55,11 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
   r = await call('POST', 'payments', { ...base1, mode: 'cheque' }, up); ok('cheque number already recorded is refused as duplicate', r.s === 409 && r.j.duplicate === true);
   r = await call('POST', 'payments', { ...base1, mode: 'card', txnId: '' }, up); ok('card payment without a payment ID is rejected', r.s === 400 && r.j.needTxn === true);
   r = await call('POST', 'payments', { ...base1, mode: 'card' }, up); ok('card payment ID already recorded is refused as duplicate', r.s === 409 && r.j.duplicate === true);
+  const fp = (n, amt) => ({ mode: 'upi', amount: String(amt), date: '2026-11-25T10:00', txnId: 'PLANTXN' + n, imageId: img });
+  r = await call('POST', 'orders', { phone: P(), code: 'plan-0', customer: 'x', total: 100000, firstPayment: fp('0', 5000), noDue: true }, up); ok('new order without a plan or due date is refused', r.s === 400 && r.j.needDue === true);
+  r = await call('POST', 'orders', { phone: P(), code: 'plan-0', customer: 'x', total: 100000, firstPayment: fp('0', 5000), schedule: [{ date: '2030-02-01', amount: 80000 }, { date: '2030-03-01', amount: 30000 }] }, up); ok('plan adding up to more than the total is refused', r.s === 400);
+  r = await call('POST', 'orders', { phone: P(), code: 'plan-0', customer: 'x', total: 100000, firstPayment: fp('0', 5000), nextDue: 'soon' }, up); ok('invalid next due date is refused', r.s === 400);
+  r = await call('POST', 'payments', { ...base1, noDue: true, orderCode: 'DEMO-1001', txnId: 'NODUE0001', amount: 1000 }, up); ok('payment leaving a balance needs the next due date', r.s === 400 && r.j.needDue === true);
   const p2 = { orderCode: 'DEMO-1001', mode: 'transfer', amount: 5000, date: '2026-11-25T14:11', txnId: 'NEFT0002', imageId: img };
   r = await call('POST', 'payments', { ...p2, seq: 4 }, up); ok('wrong payment number asks for a reason', r.s === 409 && r.j.needReason === true && r.j.expected === 2);
   r = await call('POST', 'payments', { ...p2, seq: 4, seqReason: 'Third and fourth were paid in cash' }, up); ok('out-of-order number accepted with a reason, no manager step', r.s === 200 && r.j.payment.seq === 4 && !r.j.payment.needsOwner);
@@ -191,6 +197,12 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
   ok('row holds order id, client, total, approver; formula text is neutralised', row && row[2] === r.j.order.code && row[4] === '7000' && row[6] === 'Demo Manager' && row[3].startsWith("'="));
   ok('uses append only', !!ap && ap.u.includes(':append') && !gl.some(g => /clear|delete/i.test(g.u)));
   gm.close();
+  { const img2 = (await call('POST', 'images', { dataUrl: PNG }, up)).j.id;
+  const fp = (n, amt) => ({ mode: 'upi', amount: String(amt), date: '2026-11-25T10:00', txnId: 'PLANTXN' + n, imageId: img2 });
+  let r2_;
+  r2_ = await call('POST', 'orders', { phone: P(), code: 'plan-1', customer: 'x', total: 100000, firstPayment: fp('1', 5000), schedule: [{ date: '2030-03-01', amount: 50000 }, { date: '2030-02-01', amount: 50000 }] }, up); ok('order with a full plan is created', r2_.s === 200, JSON.stringify(r2_.j));
+  r2_ = await call('GET', 'orders/mine', null, up); const po = (r2_.j.orders || []).find(o => o.code === 'plan-1'); ok('own orders show the next instalment due, soonest first', po && po.due && po.due.date === '2030-02-01' && po.due.amount === 45000 && po.due.overdue === false, JSON.stringify(po));
+  }
   console.log(bad ? '\n' + bad + ' FAILED' : '\nALL API TESTS PASSED');
   srv.close(); mock.close(); process.exit(bad ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
