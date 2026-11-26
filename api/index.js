@@ -502,7 +502,7 @@ async function route(req, res) {
       if (!body.firstPayment && !isMgr) throw new HttpErr(400, 'Add the first advance payment screenshot with the order');
       const due = parseDue(body, total);
       const firstAmt = body.firstPayment ? r2(body.firstPayment.amount) : 0;
-      if (!due.schedule && !due.nextDue && r2(total - firstAmt) > 0.005) throw new HttpErr(400, 'Add the payment plan (a screenshot with the dates and amounts) or the next payment due date', { needDue: true });
+      if (!due.schedule && !due.nextDue && body.skipDue !== true && r2(total - firstAmt) > 0.005) throw new HttpErr(400, 'Add the payment plan (a screenshot with the dates and amounts) or the next payment due date', { needDue: true });
       let first = null;
       if (body.firstPayment) first = await addPayment(me, { code, status: 'pending' }, { ...body.firstPayment, seq: 1 }, { first: true });
       const o = await db.insert('orders', { code, customer: String(body.customer).trim().slice(0, 80), total, status: isMgr ? 'open' : 'pending', note: String(body.note || '').slice(0, 200), createdBy: me.name, createdById: me.id, customerExtra, phone: String(body.phone).trim().slice(0, 20), ...due, planImageId: body.planImageId && (await db.get('images', String(body.planImageId))) ? String(body.planImageId) : '' });

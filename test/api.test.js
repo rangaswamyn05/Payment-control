@@ -202,6 +202,7 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
   let r2_;
   r2_ = await call('POST', 'orders', { phone: P(), code: 'plan-1', customer: 'x', total: 100000, firstPayment: fp('1', 5000), schedule: [{ date: '2030-03-01', amount: 50000 }, { date: '2030-02-01', amount: 50000 }] }, up); ok('order with a full plan is created', r2_.s === 200, JSON.stringify(r2_.j));
   r2_ = await call('GET', 'orders/mine', null, up); const po = (r2_.j.orders || []).find(o => o.code === 'plan-1'); ok('own orders show the next instalment due, soonest first', po && po.due && po.due.date === '2030-02-01' && po.due.amount === 45000 && po.due.overdue === false, JSON.stringify(po));
+  r = await call('POST', 'orders', { phone: P(), code: 'plan-skip', customer: 'x', total: 100000, firstPayment: fp('skip1', 5000), noDue: true, skipDue: true }, up); ok('skipping the plan is allowed', r.s === 200 || r.s === 201);
   }
   console.log(bad ? '\n' + bad + ' FAILED' : '\nALL API TESTS PASSED');
   srv.close(); mock.close(); process.exit(bad ? 1 : 0);
