@@ -505,7 +505,7 @@ async function route(req, res) {
       if (!due.schedule && !due.nextDue && r2(total - firstAmt) > 0.005) throw new HttpErr(400, 'Add the payment plan (a screenshot with the dates and amounts) or the next payment due date', { needDue: true });
       let first = null;
       if (body.firstPayment) first = await addPayment(me, { code, status: 'pending' }, { ...body.firstPayment, seq: 1 }, { first: true });
-      const o = await db.insert('orders', { code, customer: String(body.customer).trim().slice(0, 80), total, status: isMgr ? 'open' : 'pending', note: String(body.note || '').slice(0, 200), createdBy: me.name, createdById: me.id, customerExtra, phone: String(body.phone).trim().slice(0, 20), ...due });
+      const o = await db.insert('orders', { code, customer: String(body.customer).trim().slice(0, 80), total, status: isMgr ? 'open' : 'pending', note: String(body.note || '').slice(0, 200), createdBy: me.name, createdById: me.id, customerExtra, phone: String(body.phone).trim().slice(0, 20), ...due, planImageId: body.planImageId && (await db.get('images', String(body.planImageId))) ? String(body.planImageId) : '' });
       await audit(me, 'order_created', 'order', o.code, `${o.customer}, total ${o.total}${o.status === 'pending' ? ', waiting for approval' : ''}`);
       if (o.status === 'open') await afterApprove(me, o, settings);
       else await notify('role:manager', `New order ${o.code} (${o.customer}, ${inr(o.total)}) is waiting for approval.`, o.code);

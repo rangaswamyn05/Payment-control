@@ -91,7 +91,7 @@ function shell(active, inner) {
   const u = S.user; const mgr = RANK[u.role] >= RANK.manager;
   const items = [];
   if (mgr) items.push(['#/', 'Dashboard'], ['#/orders', 'Orders'], ['#/payments', 'Payments'], ['#/review', 'Review' + (S.badge ? `<span class="pill">${S.badge}</span>` : '')], ['#/statement', 'Statement']);
-  if (!mgr) items.push(['#/new-order', 'New order', 'Start here for a new customer booking: phone number, order total and the first advance screenshot.']);
+  if (!mgr) items.push(['#/home', 'Home', 'Your orders: what is collected, what is outstanding and who to chase next.'], ['#/new-order', 'New order', 'Start here for a new customer booking: phone number, order total and the first advance screenshot.']);
   items.push(['#/add', 'Add payment', 'For a later instalment on an order that already exists.'], ['#/mine', mgr ? 'My entries' : 'My submissions', mgr ? 'Payments you entered yourself, with their status.' : 'The orders and payments you have sent in, with their status.'], ['#/inbox', 'Inbox' + (S.unread ? `<span class="pill">${S.unread}</span>` : ''), 'Updates for you: approvals, changes asked for and alerts.']);
   if (mgr) items.push(['#/audit', 'Audit log']);
   if (u.role === 'owner') items.push(['#/reports', 'Reports'], ['#/team', 'Team'], ['#/settings', 'Settings']);
@@ -120,7 +120,7 @@ function viewLogin() {
             ? await api('POST', 'setup', { name: document.getElementById('nm').value, username: document.getElementById('un').value, password: document.getElementById('pw').value })
             : await api('POST', 'login', { username: document.getElementById('un').value, password: document.getElementById('pw').value });
           S.tok = r.token; S.user = r.user; localStorage.setItem('pc_tok', S.tok);
-          go(RANK[S.user.role] >= RANK.manager ? '#/' : '#/add'); render();
+          go(RANK[S.user.role] >= RANK.manager ? '#/' : '#/home'); render();
         } catch (ex) { err.textContent = ex.message; }
       });
     } };
@@ -317,14 +317,15 @@ async function render() {
   const [a, b] = parts;
   let v;
   try {
-    if (!a) { if (!mgr) return go('#/add'); v = await viewDashboard(S.month); }
-    else if (a === 'login') { return go(mgr ? '#/' : '#/add'); }
+    if (!a) { if (!mgr) return go('#/home'); v = await viewDashboard(S.month); }
+    else if (a === 'login') { return go(mgr ? '#/' : '#/home'); }
+    else if (a === 'home' && !mgr) v = await viewHome();
     else if (a === 'add') v = viewAdd();
     else if (a === 'new-order') v = await viewNewOrder();
     else if (a === 'mine') v = await viewMine();
     else if (a === 'inbox') v = await viewInbox();
     else if (a === 'fix' && b) v = await viewFix(b);
-    else if (!mgr) return go('#/add');
+    else if (!mgr) return go('#/home');
     else if (a === 'orders') v = b ? await viewOrder(b) : await viewOrders();
     else if (a === 'payments') v = await viewPayments();
     else if (a === 'review') v = await viewReview();

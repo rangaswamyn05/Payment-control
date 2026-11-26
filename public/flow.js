@@ -92,7 +92,7 @@ function viewAdd() {
   <div class="card" style="margin-bottom:14px"><div class="field"><label for="f_ph">Customer phone number <span class="opt">(finds their orders)</span></label><input id="f_ph" class="in" inputmode="tel" value="${esc(A.phone || '')}" autocomplete="off">${(A.byPhone || []).length ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">${A.byPhone.map(o => `<button type="button" class="btn s" data-pick="${esc(o.code)}">${esc(o.code)} · ${esc(o.customer)}</button>`).join('')}</div>` : A.phoneTried ? '<div class="muted" style="font-size:13px;margin-top:6px">No open orders for that number.</div>' : ''}</div><div class="field" style="margin:0"><label for="f_o">Order ID</label><input id="f_o" class="in" value="${esc(A.orderCode)}" autocapitalize="characters" autocomplete="off"><div id="ohint" class="${A.orderErr ? 'err' : 'ok'}" style="min-height:20px;margin-top:6px">${A.orderErr ? esc(A.orderErr) : i ? `${esc(i.customer)} · order total ${inr(i.total)}` : ''}</div></div>
   ${i && !A.orderErr ? `<div class="field" style="margin:8px 0 0"><label for="f_s">Which payment is this?</label><select id="f_s" class="in">${opts}</select></div>` : ''}
   ${A.needReason ? `<div class="field" style="margin:12px 0 0"><div class="note warn" style="margin-bottom:8px">This looks like payment ${A.needReason}, but you picked ${esc(A.seq)}. Write why, then save again.</div><input id="f_sr" class="in" placeholder="Reason" value="${esc(A.seqReason)}"></div>` : ''}</div>
-  <div class="card"><form id="af" novalidate>${payFields(P)}<div class="err" id="aerr" style="min-height:18px;margin-bottom:6px">${esc(A.err || P.err || '')}</div><button class="btn p" type="submit" style="width:100%;min-height:52px" ${A.busy || P.busy ? 'disabled' : ''}>${P.mode === 'cash' ? 'Submit for approval' : 'Submit for validation'}</button></form></div></div>`,
+  <div class="card"><form id="af" novalidate>${payFields(P)}${i && !A.orderErr && !i.hasPlan ? `<div class="field"><label for="f_nd">Next payment due <span class="opt">(skip only if this clears the balance)</span></label><input id="f_nd" type="date" class="in" value="${esc(A.nextDue || '')}"></div>` : ''}<div class="err" id="aerr" style="min-height:18px;margin-bottom:6px">${esc(A.err || P.err || '')}</div><button class="btn p" type="submit" style="width:100%;min-height:52px" ${A.busy || P.busy ? 'disabled' : ''}>${P.mode === 'cash' ? 'Submit for approval' : 'Submit for validation'}</button></form></div></div>`,
     after() {
       const redraw = () => render();
       wirePay(P, redraw);
@@ -121,6 +121,7 @@ function viewAdd() {
       });
       if (A.orderCode && !A.info && !A.orderErr) fo.dispatchEvent(new Event('input'));
       const fs = document.getElementById('f_s'); if (fs) fs.addEventListener('change', () => { A.seq = fs.value; A.needReason = null; });
+      const nd = document.getElementById('f_nd'); if (nd) nd.addEventListener('input', () => { A.nextDue = nd.value; });
       const fr = document.getElementById('f_sr'); if (fr) fr.addEventListener('input', () => { A.seqReason = fr.value; });
       document.getElementById('af').addEventListener('submit', async e => {
         e.preventDefault(); A.err = ''; P.err = '';
@@ -128,8 +129,8 @@ function viewAdd() {
         if (A.err) { document.getElementById('aerr').textContent = A.err; return; }
         A.busy = true; render();
         try {
-          const r = await api('POST', 'payments', { ...payBody(P), orderCode: A.orderCode.trim(), seq: A.seq || A.info.nextPayment, seqReason: A.seqReason });
-          A.notice = r.notice; A.done = r.payment; A.P = newPay(); A.info = null; A.orderCode = ''; A.seq = ''; A.seqReason = ''; A.needReason = null;
+          const r = await api('POST', 'payments', { ...payBody(P), orderCode: A.orderCode.trim(), seq: A.seq || A.info.nextPayment, seqReason: A.seqReason, nextDue: A.nextDue || undefined });
+          A.notice = r.notice; A.done = r.payment; A.P = newPay(); A.info = null; A.orderCode = ''; A.seq = ''; A.seqReason = ''; A.needReason = null; A.nextDue = '';
         } catch (ex) { if (ex.data && ex.data.needReason) { A.needReason = ex.data.expected; A.err = ''; } else A.err = ex.message; }
         A.busy = false; render();
       });
@@ -139,16 +140,44 @@ function viewAdd() {
 // ---------- New order (sales) ----------
 async function viewNewOrder() {
   const { settings } = await api('GET', 'settings');
-  const N = S.newOrder || (S.newOrder = { code: '', phone: '', customer: '', total: '', extra: {}, P: newPay(), err: '', busy: false, done: null });
+  const N = S.newOrder || (S.newOrder = { code: '', phone: '', customer: '', total: '', extra: {}, P: newPay(), err: '', busy: false, done: null, dueMode: 'plan', nextDue: '', plan: [{ date: '', amount: '' }], planImg: '', planMsg: '', planBusy: false });
   if (N.done) return { active: '#/new-order', html: `<div style="max-width:520px;margin:0 auto"><div class="card" style="text-align:center;padding:32px 20px"><div class="tick">✓</div><h2 style="font-size:20px">Sent for approval</h2><p><b>${esc(N.done.code)}</b> · ${esc(N.done.customer)}</p><p class="muted">A manager or the owner will approve it. You will see a note in your Inbox if anything changes.</p><button class="btn p" style="width:100%;margin-top:14px" data-act="anotherOrder">Create another order</button></div></div>`, after() { DROP.cur = null; } };
   const P = N.P, auto = settings.orderIdMode === 'auto';
+  N.dueMode = N.dueMode || 'plan'; N.plan = N.plan && N.plan.length ? N.plan : [{ date: '', amount: '' }]; N.nextDue = N.nextDue || '';
+  const planRows = N.plan.map((r, i) => `<div class="two field" style="align-items:end"><div><label>Due date</label><input type="date" class="in" data-pr="${i}:date" value="${esc(r.date)}"></div><div style="display:flex;gap:8px;align-items:end"><div style="flex:1"><label>Amount (₹)</label><input class="in" inputmode="decimal" data-pr="${i}:amount" value="${esc(r.amount)}"></div><button type="button" class="btn s" data-prm="${i}" aria-label="Remove this instalment">✕</button></div></div>`).join('');
+  const planCard = `<div class="card" style="margin-bottom:14px"><h2 style="margin-bottom:6px">Payment plan</h2><div class="muted" style="font-size:13px;margin-bottom:10px">What the customer will pay and when. Not needed if the first payment covers the full total.</div>
+  <div class="seg" role="group" aria-label="Payment plan" style="margin-bottom:12px"><button type="button" class="${N.dueMode === 'plan' ? 'on' : ''}" data-dmode="plan">Plan screenshot</button><button type="button" class="${N.dueMode === 'next' ? 'on' : ''}" data-dmode="next">Next payment date only</button></div>
+  ${N.dueMode === 'plan' ? `<label class="btn" style="width:100%;margin-bottom:10px;text-align:center;cursor:pointer">${N.planBusy ? 'Reading the screenshot…' : N.planImg ? 'Choose a different screenshot' : 'Choose a screenshot of the dates and amounts'}<input type="file" id="plf" accept="image/*" hidden></label>${N.planMsg ? `<div class="note" style="margin-bottom:10px">${esc(N.planMsg)}</div>` : ''}<div class="muted" style="font-size:13px;margin-bottom:8px">List every instalment, including the first advance.</div>${planRows}<button type="button" class="btn s" data-padd>+ Add instalment</button><div class="muted" id="pleft" style="font-size:13px;margin-top:8px"></div>` : `<div class="field"><label for="ond">Next payment due</label><input id="ond" type="date" class="in" data-n="nextDue" value="${esc(N.nextDue)}"></div>`}</div>`;
   const extras = (settings.customerFields || []).map(f => `<div class="field"><label for="x_${f.key}">${esc(f.label)}</label><input id="x_${f.key}" class="in" data-x="${f.key}" value="${esc(N.extra[f.key] || '')}"></div>`).join('');
   return { active: '#/new-order', html: `<div style="max-width:520px;margin:0 auto"><div class="head" style="margin-bottom:12px"><div><h1 style="font-size:24px">New order</h1><div class="muted" style="font-size:13px;margin-top:4px">Start here for a new customer booking: phone number, order total and the first advance screenshot.</div></div></div>
   <form id="nf" novalidate><div class="card" style="margin-bottom:14px"><div class="field"><label for="oph">Customer phone number</label><input id="oph" class="in" data-n="phone" inputmode="tel" value="${esc(N.phone)}" autocomplete="off">${(N.found || []).length && !N.skipFound ? `<div class="note warn" style="margin-top:10px"><b>This customer already has open orders.</b> Pick one to add a payment to it, or continue to create a new order.<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">${N.found.map(o => `<button type="button" class="btn s p" data-existing="${esc(o.code)}">${esc(o.code)} · ${esc(o.customer)}</button>`).join('')}<button type="button" class="btn s" data-newone>It's a new order</button></div></div>` : ''}</div><div class="two field">${auto ? '<div><label>Order ID</label><div class="muted" style="padding:12px 0">Created for you</div></div>' : `<div><label for="oc">Order ID</label><input id="oc" class="in" data-n="code" value="${esc(N.code)}" autocapitalize="characters" autocomplete="off"></div>`}<div><label for="ot">Total order value (₹)</label><input id="ot" class="in" data-n="total" inputmode="decimal" value="${esc(N.total)}"></div></div>
   <div class="field"><label for="ocu">Client name</label><input id="ocu" class="in" data-n="customer" value="${esc(N.customer)}"></div>${extras}</div>
-  <div class="card"><h2 style="margin-bottom:10px">First advance payment</h2>${payFields(P)}<div class="err" id="nerr" style="min-height:18px;margin-bottom:6px">${esc(N.err || P.err || '')}</div><button class="btn p" type="submit" style="width:100%;min-height:52px" ${N.busy || P.busy ? 'disabled' : ''}>${P.mode === 'cash' ? 'Submit for approval' : 'Submit for validation'}</button></div></form></div>`,
+  ${planCard}<div class="card"><h2 style="margin-bottom:10px">First advance payment</h2>${payFields(P)}<div class="err" id="nerr" style="min-height:18px;margin-bottom:6px">${esc(N.err || P.err || '')}</div><button class="btn p" type="submit" style="width:100%;min-height:52px" ${N.busy || P.busy ? 'disabled' : ''}>${P.mode === 'cash' ? 'Submit for approval' : 'Submit for validation'}</button></div></form></div>`,
     after() {
       wirePay(P, () => render());
+      const num = v => Number(String(v).replace(/,/g, '')) || 0;
+      const left = () => { const el = document.getElementById('pleft'); if (el) { const l = num(N.total) - N.plan.reduce((a, r) => a + num(r.amount), 0); el.textContent = num(N.total) > 0 ? (l >= 0 ? 'Left to schedule: ' + inr(l) : 'The instalments add up to ' + inr(-l) + ' more than the order total.') : 'Enter the order total to see how much is left to schedule.'; } };
+      left();
+      document.querySelectorAll('[data-dmode]').forEach(b => b.addEventListener('click', () => { N.dueMode = b.dataset.dmode; render(); }));
+      document.querySelectorAll('[data-pr]').forEach(el => el.addEventListener('input', () => { const [i, k] = el.dataset.pr.split(':'); N.plan[+i][k] = el.value; left(); }));
+      document.querySelectorAll('[data-prm]').forEach(b => b.addEventListener('click', () => { N.plan.splice(+b.dataset.prm, 1); render(); }));
+      const pa = document.querySelector('[data-padd]'); if (pa) pa.addEventListener('click', () => { N.plan.push({ date: '', amount: '' }); render(); });
+      const totEl = document.querySelector('[data-n="total"]'); if (totEl) totEl.addEventListener('input', left);
+      const plf = document.getElementById('plf');
+      if (plf) plf.addEventListener('change', async () => {
+        const file = plf.files && plf.files[0]; if (!file) return;
+        if (!file.type.startsWith('image/')) { toast('Please choose an image (a screenshot or photo).', true); return; }
+        N.planBusy = true; N.planMsg = ''; render();
+        try {
+          const { id } = await api('POST', 'images', { dataUrl: await downscale(file) }); N.planImg = id;
+          const r = await api('POST', 'ocr', { imageId: id, kind: 'plan' });
+          if (!r.configured) N.planMsg = 'Automatic reading is off. Type each date and amount below.';
+          else if (r.error) N.planMsg = r.error;
+          else if (r.parsed && r.parsed.schedule && r.parsed.schedule.length) { N.plan = r.parsed.schedule.map(x => ({ date: x.date, amount: String(x.amount) })); N.planMsg = 'We read these rows. Please check each date and amount.'; }
+          else N.planMsg = 'We could not find dates and amounts in that image. Type them below.';
+        } catch (ex) { N.planMsg = ex.message || 'Could not use that image'; }
+        N.planBusy = false; render();
+      });
       document.querySelectorAll('[data-n]').forEach(el => el.addEventListener('input', () => { N[el.dataset.n] = el.value; }));
       let ft; document.getElementById('oph').addEventListener('input', e => {
         clearTimeout(ft); N.skipFound = false;
@@ -165,9 +194,19 @@ async function viewNewOrder() {
         e.preventDefault(); N.err = ''; P.err = '';
         if (N.phone.replace(/\D/g, '').length < 7) N.err = 'Enter the customer’s phone number.'; else if (!auto && !N.code.trim()) N.err = 'Enter the order ID.'; else if (!N.customer.trim()) N.err = 'Enter the client name.'; else if (!(Number(String(N.total).replace(/,/g, '')) > 0)) N.err = 'Enter the total order value.';
         else N.err = payCheck(P);
+        const rest = num(N.total) - num(P.amount); let planBody = {};
+        if (!N.err && rest > 0.005) {
+          if (N.dueMode === 'next') { if (!N.nextDue) N.err = 'Enter the next payment due date, or add the payment plan.'; else planBody = { nextDue: N.nextDue }; }
+          else {
+            const rows = N.plan.filter(r => r.date || r.amount);
+            if (!rows.length) N.err = 'Add the payment plan (date and amount for each instalment), or choose Next payment date only.';
+            else if (rows.some(r => !r.date || !(num(r.amount) > 0))) N.err = 'Each instalment needs a due date and an amount.';
+            else planBody = { schedule: rows.map(r => ({ date: r.date, amount: String(num(r.amount)) })), planImageId: N.planImg || '' };
+          }
+        }
         if (N.err) { document.getElementById('nerr').textContent = N.err; return; }
         N.busy = true; render();
-        const send = confirmSame => api('POST', 'orders', { code: N.code.trim(), phone: N.phone, confirmSamePhone: confirmSame, customer: N.customer, total: String(N.total).replace(/,/g, ''), customerExtra: N.extra, firstPayment: payBody(P) });
+        const send = confirmSame => api('POST', 'orders', { code: N.code.trim(), phone: N.phone, confirmSamePhone: confirmSame, customer: N.customer, total: String(N.total).replace(/,/g, ''), customerExtra: N.extra, firstPayment: payBody(P), ...planBody });
         try { let r; try { r = await send(false); } catch (ex) { if (ex.data && ex.data.samePhone) { const l = ex.data.samePhone.map(o => `${o.code} (${o.customer})`).join(', '); if (!(await confirmBox({ title: 'Same customer?', text: `This phone number already has: ${l}. If it is the same customer, check you are not creating a duplicate. Create a new order anyway?`, ok: 'Yes, new order' }))) { N.busy = false; render(); return; } r = await send(true); } else throw ex; } N.done = r.order; }
         catch (ex) { N.err = ex.message; }
         N.busy = false; render();
@@ -184,6 +223,28 @@ async function viewFix(code) {
   return { active: '#/mine', html: `${backBtn('#/mine')}<div style="max-width:520px;margin:0 auto"><h1 style="font-size:24px;margin-bottom:10px">Fix ${esc(o.code)}</h1><div class="note warn" style="margin-bottom:14px">Sent back: ${esc(o.rejectReason)}</div>
   <form class="card" id="ff"><div class="field"><label for="fc">Client name</label><input id="fc" class="in" value="${esc(o.customer)}"></div><div class="field"><label for="ft">Total order value (₹)</label><input id="ft" class="in" inputmode="decimal" value="${esc(o.total)}"></div>${extras}<div class="err" id="ferr" style="min-height:18px"></div><button class="btn p" style="width:100%" type="submit">Send again for approval</button></form></div>`,
     after() { document.getElementById('ff').addEventListener('submit', async e => { e.preventDefault(); const ex = {}; document.querySelectorAll('[data-x]').forEach(i => { ex[i.dataset.x] = i.value; }); try { await api('POST', `orders/${encodeURIComponent(code)}/resubmit`, { customer: document.getElementById('fc').value, total: document.getElementById('ft').value.replace(/,/g, ''), customerExtra: ex }); toast('Sent again'); go('#/mine'); } catch (er) { document.getElementById('ferr').textContent = er.message; } }); } };
+}
+
+
+// ---------- Home (sales): what is collected, what is outstanding, who to chase ----------
+async function viewHome() {
+  const { orders } = await api('GET', 'orders/mine');
+  const open = orders.filter(o => o.status === 'open');
+  const waiting = orders.filter(o => o.status === 'pending').length, back = orders.filter(o => o.status === 'rejected').length;
+  const r2 = n => Math.round(n * 100) / 100;
+  const coll = r2(open.reduce((a, o) => a + o.collected, 0)), out = r2(open.reduce((a, o) => a + o.outstanding, 0));
+  const due = open.filter(o => o.due).sort((a, b) => a.due.date.localeCompare(b.due.date));
+  const nodue = open.filter(o => !o.due && o.outstanding > 0);
+  const dfmt = d => new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+  const row = (o, right) => `<div class="tr" style="min-width:320px"><div class="c1"><b>${esc(o.code)}</b><div class="muted" style="font-size:13px">${esc(o.customer)}</div></div>${right}</div>`;
+  const dueRows = due.map(o => row(o, `<div class="c r">${o.due.overdue ? '<span class="badge bad">Overdue</span> ' : ''}${esc(dfmt(o.due.date))}</div><div class="c r"><b>${inr(o.due.amount)}</b></div>`)).join('');
+  const noRows = nodue.map(o => row(o, `<div class="c r muted">No due date</div><div class="c r"><b>${inr(o.outstanding)}</b></div>`)).join('');
+  return { active: '#/home', html: `<div class="head"><div><h1>Home</h1><div class="muted">Your orders: what is collected, what is outstanding and who to chase next.</div></div></div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px"><a class="btn p" href="#/new-order" style="flex:1 1 200px;text-align:center">New order<div style="font-size:12px;font-weight:400;opacity:.9">New customer booking</div></a><a class="btn p" href="#/add" style="flex:1 1 200px;text-align:center">Add payment<div style="font-size:12px;font-weight:400;opacity:.9">Later instalment on an existing order</div></a></div>
+  <div class="row" style="margin-bottom:16px"><div class="card kpi"><div class="l">Collected</div><div class="v">${inr(coll)}</div><div class="muted">on your approved orders, including payments still waiting for validation</div></div><div class="card kpi"><div class="l">Outstanding</div><div class="v">${inr(out)}</div><div class="muted">across ${open.length} approved order${open.length === 1 ? '' : 's'}</div></div></div>
+  ${waiting || back ? `<div class="note ${back ? 'warn' : ''}" style="margin-bottom:16px">${waiting ? waiting + ' order' + (waiting === 1 ? ' is' : 's are') + ' waiting for approval. ' : ''}${back ? back + ' sent back to you: <a href="#/mine">fix and resend</a>.' : ''}</div>` : ''}
+  <div class="card" style="margin-bottom:16px"><h2 style="margin-bottom:6px">Collect next</h2><div class="muted" style="font-size:13px;margin-bottom:8px">Soonest due first. Overdue ones are marked.</div>${dueRows ? `<div class="tbl">${dueRows}</div>` : '<p class="muted">Nothing due yet. Add a payment plan or next due date when you create an order.</p>'}</div>
+  ${noRows ? `<div class="card"><h2 style="margin-bottom:6px">No due date set</h2><div class="tbl">${noRows}</div></div>` : ''}`, };
 }
 
 // ---------- My submissions ----------
