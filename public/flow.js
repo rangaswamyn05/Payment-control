@@ -33,7 +33,7 @@ function newPay() {
 function payFields(P) {
   const cash = P.mode === 'cash';
   return `<div class="seg" role="group" aria-label="Payment mode" style="margin-bottom:14px">${['upi', 'transfer', 'cheque', 'cash', 'card'].map(m => `<button type="button" class="${P.mode === m ? 'on' : ''}" data-pmode="${m}">${m === 'upi' ? 'UPI' : m === 'transfer' ? 'Bank transfer' : m === 'cheque' ? 'Cheque' : m === 'card' ? 'Card / Razorpay' : 'Cash'}</button>`).join('')}</div>
-  ${cash ? '<div class="note warn" style="margin-bottom:14px">Cash is approved by the owner before it counts as confirmed.</div>' : `${P.preview ? `<div class="card" style="padding:12px;display:flex;gap:12px;align-items:center;margin-bottom:14px"><img class="thumb" alt="Your screenshot" src="${P.preview}"><div style="flex:1"><b>${P.busy ? 'Reading the screenshot…' : 'Screenshot added'}</b><div class="muted" style="font-size:13px">${esc(P.ocrMsg || '')}</div></div><button type="button" class="btn s" data-pclear>Replace</button></div>` : dropZone('pz', 'Drop the payment screenshot here')}`}
+  ${cash ? '<div class="note warn" style="margin-bottom:14px">Cash is approved by the owner before it counts as confirmed.</div>' : `${P.preview ? `<div class="card" style="padding:12px;display:flex;gap:12px;align-items:center;margin-bottom:14px"><img class="thumb" alt="Your screenshot" src="${P.preview}"><div style="flex:1"><b>${P.busy ? 'Reading the screenshot…' : 'Screenshot added'}</b><div class="muted" style="font-size:13px">${esc(P.ocrMsg || '')}</div></div><button type="button" class="btn s" data-pclear>Replace</button></div>${P.rawText ? `<details class="muted" style="font-size:12px;margin:-6px 0 12px"><summary>What the reader saw</summary><pre style="white-space:pre-wrap;margin:6px 0 0">${esc(P.rawText)}</pre></details>` : ''}` : dropZone('pz', 'Drop the payment screenshot here')}`}
   ${cash || (P.preview && !P.busy) ? `<div class="two field"><div><label for="p_a">Amount (₹)</label><input id="p_a" class="in" data-p="amount" inputmode="decimal" value="${esc(P.amount)}"></div>${cash ? '' : `<div><label for="p_r">${P.mode === 'cheque' ? 'Cheque number' : P.mode === 'card' ? 'Payment ID' : 'Transaction ID'} <span class="opt">(required)</span></label><input id="p_r" class="in" data-p="txnId" value="${esc(P.txnId)}" autocomplete="off"></div>`}</div>
   <div class="muted" style="font-size:13px;margin-bottom:6px">Date: ${esc(P.date || P.today)} ${P.date ? '(read from the screenshot)' : '(today; the screenshot date is used when it can be read)'}</div>` : ''}`;
 }
@@ -83,7 +83,8 @@ async function readShot(P, file, redraw) {
     else {
       const p = r.parsed;
       if (p.amount) P.amount = String(p.amount);
-      P.amtAlts = p.amountUnsure && p.amount ? [p.amount, p.altAmount].filter(Boolean) : []; P.amtOk = false;
+      { const st = String(p.amount || ''), alt = p.altAmount || (r.source === 'browser' && st.length > 1 && st[0] === '2' && Number(st.slice(1)) > 0 ? Number(st.slice(1)) : 0);
+        P.amtAlts = (p.amountUnsure || r.source === 'browser') && p.amount ? [...new Set([p.amount, alt].filter(Boolean))] : []; P.amtOk = false; P.rawText = r.rawText || ''; }
       if (p.date) { P.date = p.date; P.time = p.time || ''; }
       if (p.txnId) P.txnId = p.txnId;
       if (p.payer) P.payer = p.payer; if (p.payee) P.payee = p.payee;

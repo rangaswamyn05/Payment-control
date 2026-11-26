@@ -443,7 +443,7 @@ async function route(req, res) {
     const body = await readBody(req);
     if (typeof body.text === 'string' && body.text.trim()) { // text already read in the browser (no key needed)
       const t = body.text.slice(0, 20000);
-      return send(res, 200, { configured: true, parsed: body.kind === 'plan' ? { schedule: parseSchedule(t) } : parseUpi(t) });
+      return send(res, 200, { configured: true, source: 'browser', rawText: t.slice(0, 1500), parsed: body.kind === 'plan' ? { schedule: parseSchedule(t) } : parseUpi(t) });
     }
     const img = await db.get('images', body.imageId);
     if (!img || (RANK[me.role] < RANK.manager && img.createdBy !== me.id)) throw new HttpErr(404, 'Image not found');
