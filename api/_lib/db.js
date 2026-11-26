@@ -3,8 +3,9 @@
 // otherwise an in-memory store (data is lost on restart: demo/testing only).
 const crypto = require('crypto');
 
-const SB_URL = process.env.SUPABASE_URL;
-const SB_KEY = process.env.SUPABASE_SERVICE_KEY;
+let SB_URL = (process.env.SUPABASE_URL || '').trim();
+try { if (SB_URL) SB_URL = new URL(/^https?:\/\//.test(SB_URL) ? SB_URL : 'https://' + SB_URL).origin; } catch (e) { /* left as typed */ }
+const SB_KEY = (process.env.SUPABASE_SERVICE_KEY || '').trim();
 const useSB = !!(SB_URL && SB_KEY);
 const TABLES = ['users', 'orders', 'payments', 'audit', 'settings', 'images', 'notifications', 'requests', 'invoices'];
 
@@ -13,12 +14,12 @@ const mem = global.__pcmem || (global.__pcmem = Object.fromEntries(TABLES.map(t 
 function newId(prefix) { return prefix + '_' + crypto.randomBytes(7).toString('hex'); }
 
 async function sb(path, opt = {}) {
-  const r = await fetch(SB_URL.replace(/\/$/, '') + '/rest/v1/' + path, {
+  const r = await fetch(SB_URL + '/rest/v1/' + path, {
     ...opt,
     headers: { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY, 'Content-Type': 'application/json', ...(opt.headers || {}) },
   });
   const txt = await r.text();
-  if (!r.ok) throw new Error('Database error ' + r.status + ': ' + txt.slice(0, 200));
+  if (!r.ok) throw new Error('Database error ' + r.status + ' at ' + new URL(SB_URL).host + ': ' + txt.slice(0, 200));
   return txt ? JSON.parse(txt) : null;
 }
 
