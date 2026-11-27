@@ -93,10 +93,10 @@ function shell(active, inner) {
   if (mgr) items.push(['#/', 'Dashboard'], ['#/orders', 'Orders'], ['#/payments', 'Payments'], ['#/review', 'Review' + (S.badge ? `<span class="pill">${S.badge}</span>` : '')], ['#/statement', 'Statement']);
   if (!mgr) items.push(['#/home', 'Home', 'Your orders: what is collected, what is outstanding and who to chase next.'], ['#/new-order', 'New order', 'Start here for a new customer booking: phone number, order total and the first advance screenshot.']);
   items.push(['#/add', 'Add payment', 'For a later instalment on an order that already exists.'], ['#/mine', mgr ? 'My entries' : 'My submissions', mgr ? 'Payments you entered yourself, with their status.' : 'The orders and payments you have sent in, with their status.'], ['#/inbox', 'Inbox' + (S.unread ? `<span class="pill">${S.unread}</span>` : ''), 'Updates for you: approvals, changes asked for and alerts.']);
-  items.push(['#/box', mgr ? 'Fix my business' : 'Feedback', mgr ? 'Describe a business problem or upload your flow, and we come back with a solution.' : 'Tell us what works and what does not.']);
   if (mgr) items.push(['#/audit', 'Audit log']);
   if (u.role === 'owner') items.push(['#/reports', 'Reports'], ['#/team', 'Team'], ['#/settings', 'Settings']);
-  const nav = items.map(([h, t, hint]) => `<a href="${h}" class="${active === h ? 'on' : ''}"${hint ? ` data-tip="${hint}"` : ''}>${t}</a>`).join('');
+  items.push(['#/box', mgr ? 'Fix my business' : 'Feedback', mgr ? 'Describe a business problem or upload your flow, and we come back with a solution.' : 'Tell us what works and what does not.']);
+  const nav = items.map(([h, t, hint]) => `<a href="${h}" class="${active === h ? 'on' : ''}${h === '#/box' ? ' hl' : ''}"${hint ? ` data-tip="${hint}"` : ''}>${h === '#/box' ? '✨ ' : ''}${t}</a>`).join('');
   return `<header class="top"><div class="brand"><div class="logo">${ICON.shield}</div><span>Payment Control</span></div><nav class="nav" aria-label="Main">${nav}</nav><div class="me"><div style="text-align:right"><div style="font-weight:600">${esc(u.name)}</div><div class="muted" style="font-size:12px;text-transform:capitalize">${esc(u.role)} · <a href="#/login" data-act="logout" style="text-decoration:underline">Sign out</a></div></div><div class="av">${esc(u.name[0] || '?')}</div></div></header>${S.health && S.health.db === 'memory' ? '<div class="note warn" style="border-radius:0;text-align:center">Demo storage: data is not saved permanently until the database is connected.</div>' : ''}<main class="wrap">${inner}</main>`;
 }
 

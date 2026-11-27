@@ -27,6 +27,10 @@ h2{margin:0;font-size:16px;font-weight:600}
 .nav a[data-tip]::after{content:attr(data-tip);position:absolute;left:0;top:calc(100% + 6px);z-index:50;background:#1f2937;color:#fff;font-size:13px;font-weight:400;line-height:1.35;padding:8px 12px;border-radius:8px;width:max-content;max-width:240px;white-space:normal;box-shadow:0 6px 18px rgba(0,0,0,.18);opacity:0;visibility:hidden;transform:translateY(-4px);transition:opacity .12s,transform .12s;pointer-events:none}
 .nav a[data-tip]:hover::after,.nav a[data-tip]:focus-visible::after{opacity:1;visibility:visible;transform:none}
 .nav a:hover{color:var(--acc)}
+.nav a.hl{align-self:center;padding:8px 14px;min-height:0;border:0;border-radius:999px;background:linear-gradient(135deg,#7c3aed,#db2777);color:#fff;font-weight:700;box-shadow:0 2px 10px rgba(124,58,237,.35)}
+.nav a.hl:hover,.nav a.hl.on{color:#fff;filter:brightness(1.1);outline:2px solid #fff;outline-offset:-4px}
+.fxhead{background:linear-gradient(135deg,#7c3aed,#db2777);color:#fff;border-radius:16px;padding:18px 20px;margin-bottom:16px}
+.fxhead h1,.fxhead .muted{color:#fff}
 .pill{background:var(--bad);color:#fff;border-radius:10px;padding:1px 7px;font-size:12px;margin-left:4px}
 .me{display:flex;align-items:center;gap:10px}
 .me .av{width:34px;height:34px;border-radius:17px;background:var(--acc2);color:var(--acc);font-weight:600;display:flex;align-items:center;justify-content:center}
