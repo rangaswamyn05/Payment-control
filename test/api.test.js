@@ -318,6 +318,15 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
     let r1 = await call('PUT', 'settings', { extraSystems: [{ name: 'Accounts', url: 'https://example.com/hook', key: 'k1' }, { name: 'CRM', url: 'https://crm.example.com/hook' }] }, ow); ok('owner saves two extra systems', r1.s === 200, JSON.stringify(r1.j));
     r1 = await call('GET', 'settings', null, ow); const ex = r1.j.settings.connectors.extra; ok('extra systems listed, key never returned', ex.length === 2 && ex[0].keySet === true && !('key' in ex[0]), JSON.stringify(ex));
     r1 = await call('PUT', 'settings', { extraSystems: [] }, ow); }
+  { // sample invoice as a PDF
+    const PDF = 'data:application/pdf;base64,JVBERi0xLjQKMSAwIG9iajw8Pj5lbmRvYmoKdHJhaWxlcjw8Pj4KJSVFT0Y=', NOTPDF = 'data:application/pdf;base64,aGVsbG8gbm90IGEgcGRmIGF0IGFsbA==';
+    let r3 = await call('POST', 'images', { dataUrl: PDF, kind: 'sample' }, ow); ok('owner can upload a PDF as the sample invoice', r3.s === 200 && !!r3.j.id, JSON.stringify(r3.j));
+    const pid = r3.j.id;
+    r3 = await call('POST', 'images', { dataUrl: PDF, kind: 'sample' }, up); ok('an uploader cannot upload a PDF', r3.s === 400);
+    r3 = await call('POST', 'images', { dataUrl: PDF }, ow); ok('a PDF is only for the sample invoice', r3.s === 400);
+    r3 = await call('POST', 'images', { dataUrl: NOTPDF, kind: 'sample' }, ow); ok('a file that is not really a PDF is refused', r3.s === 400);
+    r3 = await call('PUT', 'settings', { invoiceSampleId: pid }, ow); ok('the PDF can be saved as the sample', r3.s === 200);
+    r3 = await call('PUT', 'settings', { invoiceSampleId: '' }, ow); }
   { // backup, then start fresh (last, it empties everything)
     let r2 = await call('GET', 'data/backup', null, mg); ok('manager cannot take the backup', r2.s === 403);
     r2 = await call('POST', 'data/start-fresh', { confirm: 'START FRESH' }, ow); ok('start fresh needs a backup first', r2.s === 409 && r2.j.needBackup === true, JSON.stringify(r2.j));

@@ -4,8 +4,8 @@
 
 // ---------- drop and paste ----------
 const DROP = { cur: null };
-function dropZone(id, text, small) {
-  return `<div class="drop${small ? ' sm' : ''}" id="${id}" tabindex="0" role="button" aria-label="${esc(text)}"><div class="di">⬇</div><div><b>${esc(text)}</b><div class="muted" style="font-size:13px">or paste it, or tap to choose</div></div><input type="file" accept="image/*" hidden></div>`;
+function dropZone(id, text, small, accept) {
+  return `<div class="drop${small ? ' sm' : ''}" id="${id}" tabindex="0" role="button" aria-label="${esc(text)}"><div class="di">⬇</div><div><b>${esc(text)}</b><div class="muted" style="font-size:13px">or paste it, or tap to choose</div></div><input type="file" accept="${accept || 'image/*'}" hidden></div>`;
 }
 function wireDrop(id, onFile) {
   const z = document.getElementById(id); if (!z) return;
@@ -442,7 +442,7 @@ async function viewSettings() {
   <div class="two field"><div><label for="bi">Industry</label>${sel('bi', INDUSTRIES, b.industry, 1)}</div><div><label for="bg">GST</label>${sel('bg', GSTS, b.gstRate)}</div></div>
   <div class="field"><label for="bt">GST or tax number</label><input id="bt" class="in" value="${esc(b.taxId)}" ${b.taxNA ? 'disabled' : ''}><label style="font-weight:400;margin-top:8px"><input type="checkbox" id="bn" ${b.taxNA ? 'checked' : ''} style="width:18px;height:18px;vertical-align:-3px;margin-right:8px">GST or tax is not applicable to my business</label></div>
   <div class="field"><label for="ba">Business address <span class="opt">(required, printed on invoices)</span></label><input id="ba" class="in" value="${esc(b.address)}"></div><div class="field"><label for="bc">Phone and email on the invoice</label><input id="bc" class="in" value="${esc(b.contact)}"></div>
-  <div class="field"><label>Sample invoice <span class="opt">(optional)</span></label>${dropZone('iz', s.invoiceSampleId ? 'Sample added. Drop a new one to replace it' : 'Drop a sample invoice here', 1)}<div class="muted" style="font-size:13px;margin-top:4px">Invoices follow this style. If it shows details we do not collect, we will ask you.</div></div>
+  <div class="field"><label>Sample invoice <span class="opt">(optional)</span></label>${dropZone('iz', s.invoiceSampleId ? 'Sample added. Drop a new one to replace it' : 'Drop a sample invoice here (PDF or picture)', 1, 'image/*,application/pdf')}<div class="muted" style="font-size:13px;margin-top:4px">Invoices follow this style. If it shows details we do not collect, we will ask you.</div></div>
   <h2 style="margin:20px 0 6px">Business bank accounts</h2><div class="muted" style="font-size:13px;margin-bottom:10px">Add every account customers pay into. Only the last 4 digits are kept. A bank statement is accepted only if it shows one of these accounts, so a personal statement can never validate payments.</div>
   <div id="accs">${(s.accounts || []).map((x, i) => accRow(x, i)).join('')}</div><button class="btn" type="button" id="addacc" style="margin-bottom:6px">+ Add a bank account</button>
   <h2 style="margin:20px 0 10px">Order IDs</h2>
@@ -477,7 +477,19 @@ async function viewSettings() {
       const readAccs = () => [...accs.querySelectorAll('[data-acc]')].map(r => { const g = f => r.querySelector(`[data-f=${f}]`).value.trim(); return { id: g('id'), name: g('name'), bank: g('bank'), last4: g('last4'), upi: g('upi').split(/[,\s]+/).filter(Boolean) }; }).filter(a => a.name || a.last4);
       const bn = document.getElementById('bn'); bn.addEventListener('change', () => { document.getElementById('bt').disabled = bn.checked; });
       let sampleId = s.invoiceSampleId || '';
-      wireDrop('iz', async f => { try { const d = await downscale(f); const r = await api('POST', 'images', { dataUrl: d }); sampleId = r.id; document.querySelector('#iz b').textContent = 'Sample added. Save to keep it'; } catch (ex) { toast(ex.message, true); } });
+      wireDrop('iz', async f => {
+        try {
+          let d;
+          if (f.type === 'application/pdf' || /\.pdf$/i.test(f.name)) {
+            if (f.size > 3e6) throw new Error('That PDF is too large. Please use one under 3 MB, or a picture of the invoice.');
+            d = await new Promise((ok, no) => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.onerror = () => no(new Error('Could not read that PDF')); fr.readAsDataURL(f); });
+            if (!/^data:application\/pdf;base64,/.test(d)) d = 'data:application/pdf;base64,' + String(d).split(',')[1];
+          } else if (f.type.startsWith('image/')) {
+            try { d = await downscale(f); } catch (e0) { throw new Error('Could not open that picture. Please use a PDF, JPG or PNG.'); }
+          } else throw new Error('Please use a PDF, JPG or PNG.');
+          const r = await api('POST', 'images', { dataUrl: d, kind: 'sample' }); sampleId = r.id; document.querySelector('#iz b').textContent = (f.name ? f.name + ' added' : 'Sample added') + '. Save to keep it';
+        } catch (ex) { toast(ex.message, true); }
+      });
       document.getElementById('sf2').addEventListener('submit', async e => {
         e.preventDefault(); const er = document.getElementById('serr'); er.textContent = '';
         const v = id => document.getElementById(id).value;

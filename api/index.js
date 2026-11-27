@@ -456,7 +456,15 @@ async function route(req, res) {
     if (!b && m === 'POST') {
       const me = await authed(req, url, 'uploader');
       const body = await readBody(req);
-      const mt = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(String(body.dataUrl || ''));
+      const du = String(body.dataUrl || '');
+      if (body.kind === 'sample' && me.role === 'owner' && du.startsWith('data:application/pdf;base64,')) {
+        const pm = /^data:application\/pdf;base64,([A-Za-z0-9+/=]+)$/.exec(du);
+        if (!pm || Buffer.from(pm[1].slice(0, 12), 'base64').toString('latin1').slice(0, 4) !== '%PDF') throw new HttpErr(400, 'That does not look like a PDF');
+        if (pm[1].length > 4.2e6) throw new HttpErr(413, 'That PDF is too large');
+        const pdf = await db.insert('images', { dataUrl: du, createdBy: me.id, sample: true });
+        return send(res, 200, { id: pdf.id });
+      }
+      const mt = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(du);
       if (!mt) throw new HttpErr(400, 'Please choose a photo or screenshot (JPG, PNG or WebP)');
       if (mt[2].length > 4.2e6) throw new HttpErr(413, 'That image is too large');
       const img = await db.insert('images', { dataUrl: body.dataUrl, createdBy: me.id });
@@ -466,7 +474,8 @@ async function route(req, res) {
       const me = await authed(req, url, 'uploader');
       const img = await db.get('images', b);
       if (!img || (RANK[me.role] < RANK.manager && img.createdBy !== me.id)) throw new HttpErr(404, 'Not found');
-      const mt = /^data:(image\/[a-z]+);base64,(.*)$/.exec(img.dataUrl);
+      const mt = /^data:((?:image\/[a-z]+)|application\/pdf);base64,(.*)$/.exec(img.dataUrl);
+      if (mt[1] === 'application/pdf') { res.setHeader('Content-Security-Policy', 'sandbox'); res.setHeader('X-Content-Type-Options', 'nosniff'); }
       res.statusCode = 200; res.setHeader('Content-Type', mt[1]); res.setHeader('Cache-Control', 'private, max-age=3600');
       return res.end(Buffer.from(mt[2], 'base64'));
     }
