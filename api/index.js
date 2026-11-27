@@ -2,7 +2,7 @@
 // One serverless function handles every /api/* route (keeps us inside Vercel's free function limit).
 const db = require('./_lib/db');
 const A = require('./_lib/auth');
-const { parseUpi, parseSchedule } = require('./_lib/parse');
+const { parseUpi, parseSchedule, parseInvoiceStyle } = require('./_lib/parse');
 const { appendRow } = require('./_lib/connectors');
 const { dispatch, dispatchOrder, validateUrl, sheetIdFromLink, prepareSheet, sheetsConfig, catalog, pickCols, PAY_COLS, ORD_COLS, PAY_DEFAULT, ORD_DEFAULT, payRow, API_FIELDS, API_DEFAULT } = require('./_lib/connectors');
 
@@ -188,7 +188,7 @@ async function getSettings() {
     limits: { singlePayment: 0, collectionThreshold: 0, ...(s.limits || {}) },
     sheet: { id: String((s.sheet && s.sheet.id) || '').slice(0, 80), cols: { payments: pickCols(s.sheet && s.sheet.cols && s.sheet.cols.payments, PAY_COLS, PAY_DEFAULT), orders: pickCols(s.sheet && s.sheet.cols && s.sheet.cols.orders, ORD_COLS, ORD_DEFAULT) } },
     accounts: (Array.isArray(s.accounts) ? s.accounts : []).slice(0, 10).map(a => ({ id: String(a.id || ''), name: String(a.name || ''), bank: String(a.bank || ''), last4: String(a.last4 || ''), upi: (Array.isArray(a.upi) ? a.upi : []).map(x => String(x).trim().toLowerCase()).filter(x => /^[\w.\-]{2,}@[a-z]{2,}$/.test(x)).slice(0, 5) })).filter(a => a.id && a.name && /^\d{4}$/.test(a.last4)),
-    onboarded: !!s.onboarded, invoiceSampleId: s.invoiceSampleId || '', lastExportAt: s.lastExportAt || '', lastExportById: s.lastExportById || '',
+    onboarded: !!s.onboarded, invoiceStyle: s.invoiceStyle || null, invoiceSampleId: s.invoiceSampleId || '', lastExportAt: s.lastExportAt || '', lastExportById: s.lastExportById || '',
   };
 }
 async function saveSettings(next) { if (await db.get('settings', 'main')) await db.update('settings', 'main', next); else await db.insert('settings', next); }
@@ -303,17 +303,18 @@ async function applyAdjust(me, o, r, settings) {
 
 function esc(x) { return String(x == null ? '' : x).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 function invoiceHtml(o, v, inv, settings, pays, single) {
-  const b = settings.business;
+  const b = settings.business, sty = settings.invoiceStyle || {};
   const gm = b.gstRate === 'GST registered (regular)' ? b.gstMode : '', gr = Number(b.gstPct) || 0, split = p => { const r = gr; if (gm === 'incl') { const g = r2(p.amount * r / (100 + r)); return { net: r2(p.amount - g), gst: g, tot: p.amount }; } if (gm === 'excl') { const g = r2(p.amount * r / 100); return { net: p.amount, gst: g, tot: r2(p.amount + g) }; } return { net: p.amount, gst: 0, tot: p.amount }; };
   const live = pays.filter(p => p.status !== 'rejected'), sp = live.map(split);
   const rows = live.map((p, i) => `<tr><td>${esc(String(p.date || '').slice(0, 10))}</td><td>${esc(p.mode)}</td><td class="r">${esc(inr(sp[i].net))}</td><td class="r">${gm ? esc(inr(sp[i].gst)) + ' <span style="color:#667">(' + esc(String(gr)) + '%)</span>' : '-'}</td><td class="r">${esc(inr(sp[i].tot))}</td></tr>`).join('');
   const tn = r2(sp.reduce((a, x) => a + x.net, 0)), tg = r2(sp.reduce((a, x) => a + x.gst, 0)), tt = r2(sp.reduce((a, x) => a + x.tot, 0));
   const extra = settings.customerFields.map(f => `<div>${esc(f.label)}: ${esc((o.customerExtra || {})[f.key] || '')}</div>`).join('');
   return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(inv.no)}</title><style>body{font:15px system-ui,sans-serif;max-width:720px;margin:32px auto;padding:0 20px;color:#111}h1{font-size:22px;margin:0}table{width:100%;border-collapse:collapse;margin:14px 0}td,th{padding:8px;border-bottom:1px solid #ddd;text-align:left}.r{text-align:right}.big{font-size:18px;font-weight:700}@media print{.np{display:none}}</style></head><body>
-<div style="display:flex;justify-content:space-between"><div><h1>${esc(b.name || settings.businessName || 'Invoice')}</h1><div>${esc(b.address)}</div><div>${esc(b.contact)}</div><div>${b.taxNA ? '' : 'GST / Tax no: ' + esc(b.taxId)}</div></div><div style="text-align:right"><div class="big">Invoice ${esc(inv.no)}</div><div>${esc(String(inv.created || '').slice(0, 10))}</div></div></div>
-<hr><div><b>Bill to:</b> ${esc(o.customer)}</div>${extra}<div>Phone: ${esc(o.phone || '')}</div><div>Order: ${esc(o.code)}</div>${o.item ? `<div>Product / service: <b>${esc(o.item)}</b>${o.units ? ' &times; ' + esc(String(o.units)) + ' unit' + (o.units === 1 ? '' : 's') : ''}</div>` : ''}
+<div style="display:flex;justify-content:space-between"><div><h1>${esc(b.name || settings.businessName || 'Invoice')}</h1><div>${esc(b.address)}</div><div>${esc(b.contact)}</div><div>${b.taxNA ? '' : 'GST / Tax no: ' + esc(b.taxId)}</div></div><div style="text-align:right"><div class="big">${esc(sty.title || 'Invoice')} ${esc(inv.no)}</div><div>${esc(String(inv.created || '').slice(0, 10))}</div></div></div>
+<hr><div><b>${esc(sty.billTo ? sty.billTo.replace(/^./, c => c.toUpperCase()) : 'Bill to')}:</b> ${esc(o.customer)}</div>${extra}<div>Phone: ${esc(o.phone || '')}</div><div>Order: ${esc(o.code)}</div>${o.item ? `<div>Product / service: <b>${esc(o.item)}</b>${o.units ? ' &times; ' + esc(String(o.units)) + ' unit' + (o.units === 1 ? '' : 's') : ''}</div>` : ''}
 <table><tr><th>Date</th><th>Mode</th><th class="r">Amount before GST</th><th class="r">GST</th><th class="r">Total</th></tr>${rows}<tr><td colspan="2"><b>Total</b></td><td class="r"><b>${esc(inr(tn))}</b></td><td class="r"><b>${esc(inr(tg))}</b></td><td class="r"><b>${esc(inr(tt))}</b></td></tr></table>
 <table><tr><td>Order total</td><td class="r big">${esc(inr(o.total))}</td></tr><tr><td>${single ? 'Paid up to this payment' : 'Paid so far'}</td><td class="r">${esc(inr(v.collected))}</td></tr><tr><td>Balance</td><td class="r big">${esc(inr(v.outstanding))}</td></tr></table>
+${(sty.footer || []).map(l => `<div style="color:#444;font-size:13px;margin-top:4px">${esc(l)}</div>`).join('')}
 <p class="np"><button onclick="print()">Print or save as PDF</button></p></body></html>`;
 }
 
@@ -519,6 +520,33 @@ async function route(req, res) {
     const text = (resp.fullTextAnnotation && resp.fullTextAnnotation.text) || (resp.textAnnotations && resp.textAnnotations[0] && resp.textAnnotations[0].description) || '';
     if (!text) return send(res, 200, { configured: true, error: 'No text found in the image. Enter the details by hand.' });
     return send(res, 200, { configured: true, rawText: text.slice(0, 1500), parsed: body.kind === 'plan' ? { schedule: parseSchedule(text) } : await mentions(parseUpi(text), text) });
+  }
+
+  // ----- read the sample invoice (owner): words -> layout to follow
+  if (a === 'invoice-style' && m === 'POST') {
+    const me = await authed(req, url, 'owner');
+    const body = await readBody(req);
+    const cur = await getSettings();
+    const img = await db.get('images', body.imageId || cur.invoiceSampleId);
+    if (!img) throw new HttpErr(404, 'Sample invoice not found');
+    let text = typeof body.text === 'string' ? body.text.slice(0, 20000) : '';
+    if (!text) {
+      if (!process.env.GOOGLE_VISION_KEY) return send(res, 200, { configured: false });
+      const m0 = /^data:([\w/+.-]+);base64,/.exec(img.dataUrl || ''), b64 = String(img.dataUrl || '').split(',')[1], pdf = m0 && m0[1] === 'application/pdf';
+      const key = encodeURIComponent(process.env.GOOGLE_VISION_KEY);
+      const r = pdf
+        ? await fetch('https://vision.googleapis.com/v1/files:annotate?key=' + key, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ requests: [{ inputConfig: { content: b64, mimeType: 'application/pdf' }, features: [{ type: 'DOCUMENT_TEXT_DETECTION' }], pages: [1, 2] }] }) })
+        : await fetch('https://vision.googleapis.com/v1/images:annotate?key=' + key, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ requests: [{ image: { content: b64 }, features: [{ type: 'DOCUMENT_TEXT_DETECTION' }] }] }) });
+      if (!r.ok) return send(res, 200, { configured: true, error: 'Could not read the sample (' + r.status + '). Invoices will use the standard layout.' });
+      const j = await r.json();
+      const resp = pdf ? ((j.responses || [])[0] || {}).responses || [] : j.responses || [];
+      text = resp.map(x => (x.fullTextAnnotation && x.fullTextAnnotation.text) || '').join('\n');
+    }
+    if (!text.trim()) return send(res, 200, { configured: true, error: 'No text found in the sample. Invoices will use the standard layout.' });
+    const style = { ...parseInvoiceStyle(text), imageId: img.id, readAt: new Date().toISOString() };
+    await saveSettings({ invoiceStyle: style });
+    await audit(me, 'invoice_style_read', 'settings', 'invoice', style.title || 'sample read');
+    return send(res, 200, { configured: true, style });
   }
 
   // ----- orders

@@ -66,5 +66,12 @@ eq('rupee sign read as a percent sign', parseUpi('Completed\n\n% 30,000\n\nTo: R
 { const u = parseUpi('Payment successful\n25,000\nPaid to Ramesh\n25 Nov 2026, 2:11 PM\nUPI Transaction ID\nT2611251411ABCD'); eq('lone number with no rupee sign is flagged and offers the number without a leading 2', [u.amountUnsure, u.amount, u.altAmount], [true, 25000, 5000]); }
 { const u = parseUpi('Paid ₹25,000\nTo Ramesh'); eq('amount with a rupee sign is trusted', [u.amountUnsure, u.altAmount], [undefined, undefined]); }
 eq('phone number shown on the screenshot is read', [parseUpi('WhatsApp\n+91 98765 43210\nPaid ₹5,000\nUPI transaction ID\n632912345678').phone, parseUpi('Paid ₹5,000\nUPI transaction ID\n632912345678').phone], ['9876543210', undefined]);
+// ---- sample invoice style
+{
+  const { parseInvoiceStyle } = require('../api/_lib/parse');
+  const st = parseInvoiceStyle('Sunrise Studio\nTAX INVOICE\nGSTIN: 27ABCDE1234F1Z5\nInvoice No: 12\nDate: 01/11/2026\nBill To: Ravi\nAddress: 12 MG Road\nSr Description HSN/SAC Qty Rate Taxable Value CGST SGST Amount\n1 Photography 9983 1 1000 1000 90 90 1180\nPlace of Supply: Maharashtra\nThank you for your business\nThis is a computer generated invoice');
+  eq('sample invoice: heading, label, columns and footer read', [st.title, /bill to/i.test(st.billTo), st.columns.length >= 5, st.footer.length, st.taxInvoice], ['TAX INVOICE', true, true, 2, true]);
+  eq('sample invoice: fields we do not collect are listed', [st.missing.includes('HSN or SAC code'), st.missing.includes('Place of supply'), st.missing.includes('CGST and SGST (or IGST) split')], [true, true, true]);
+}
 console.log(bad ? bad + ' FAILED' : 'ALL PARSER TESTS PASSED');
 process.exit(bad ? 1 : 0);

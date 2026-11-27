@@ -228,4 +228,29 @@ function parseSchedule(text) {
   return dates.length && dates.length === amts.length ? dates.map((date, i) => ({ date, amount: amts[i] })) : [];
 }
 
-module.exports = { parseUpi, parseDate, findAmounts, parseSchedule };
+// Reads the words of a sample invoice and returns how it is laid out, so ours can follow it.
+function parseInvoiceStyle(text) {
+  const lines = String(text || '').split(/\r?\n/).map(x => x.replace(/\s+/g, ' ').trim()).filter(Boolean).slice(0, 200);
+  const st = { title: '', billTo: '', invoiceNo: '', date: '', columns: [], footer: [], missing: [], taxInvoice: false };
+  for (const l of lines.slice(0, 15)) { if (/^(tax invoice|proforma invoice|invoice|bill of supply|cash memo|cash bill|receipt)\b/i.test(l)) { st.title = l.replace(/[:\-–]+$/, '').slice(0, 40); break; } }
+  st.taxInvoice = /tax invoice/i.test(text) || /\bgstin\b/i.test(text);
+  for (const l of lines) { const m = /^(bill(?:ed)? to|sold to|customer(?: name)?|buyer|invoice to)\s*:?/i.exec(l); if (m) { st.billTo = m[1].slice(0, 30); break; } }
+  { const m = /(invoice\s*(?:no|number|#)\.?|inv\.? no\.?)/i.exec(text); if (m) st.invoiceNo = m[1].slice(0, 30); }
+  { const m = /^(invoice date|date of issue|dated|date)\b/im.exec(text); if (m) st.date = m[1].slice(0, 30); }
+  const HEAD = /(description of goods|description|particulars|item|product|service|hsn\/sac|hsn|sac|quantity|qty|rate|price|unit price|taxable value|taxable|cgst|sgst|igst|gst|tax|discount|amount|total)/ig;
+  let best = [];
+  for (const l of lines) { const hits = [...l.matchAll(HEAD)].map(m => m[1]); if (hits.length >= 3 && hits.length > best.length && l.length < 140) best = hits; }
+  st.columns = best.map(x => x.replace(/\b\w/g, c => c.toUpperCase())).filter((x, i, a) => a.indexOf(x) === i).slice(0, 8);
+  const has = re => re.test(text);
+  if (has(/\b(hsn|sac)\b/i)) st.missing.push('HSN or SAC code');
+  if (has(/\b(cgst|sgst|igst|utgst)\b/i)) st.missing.push('CGST and SGST (or IGST) split');
+  if (has(/place of supply/i)) st.missing.push('Place of supply');
+  if (has(/\bpan\b/i)) st.missing.push('PAN');
+  if (has(/e-?mail/i)) st.missing.push('Customer email');
+  if (has(/(bill(?:ed)? to|ship(?:ped)? to|buyer)[\s\S]{0,60}(address|road|street|nagar|pin)/i)) st.missing.push('Customer address');
+  if (has(/due date|payment terms/i)) st.missing.push('Due date or payment terms');
+  const FOOT = /(thank|terms|conditions|signature|authori[sz]ed|computer generated|bank|a\/c|account no|ifsc|declaration|subject to|jurisdiction|e\.? ?& ?o\.? ?e)/i;
+  st.footer = lines.slice(-12).filter(l => FOOT.test(l) && l.length <= 140).slice(-4);
+  return st;
+}
+module.exports = { parseUpi, parseDate, findAmounts, parseSchedule, parseInvoiceStyle };
