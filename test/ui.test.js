@@ -38,6 +38,12 @@ fs.mkdirSync('/tmp/pcshots', { recursive: true });
   ok('upload box says to use the app screenshot, not a photo', /not a photo of the screen/.test(await pg.locator('body').innerText()));
   await pg.fill('#f_o', 'demo-1001'); await pg.waitForFunction(() => /order total/.test(document.getElementById('ohint').textContent));
   ok('order lookup shows client, total and the next payment number pre-selected', (await pg.textContent('#ohint')).includes('Demo client A') && (await pg.inputValue('#f_s')) === '1');
+  // adversarial: an image with no payment on it (a payments-app home screen) is turned back with a clear message
+  await pg.route(/\/ocr/, r => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ configured: true, source: 'server', rawText: 'Google Pay Send money Pay contacts', parsed: { amount: null, date: null, time: null, txnId: null, payer: null, payee: null, confidence: 'low' } }) }), { times: 1 });
+  await pg.setInputFiles('#pz input', { name: 'home.png', mimeType: 'image/png', buffer: PNG });
+  await pg.waitForFunction(() => /could not find a payment in this image/.test(document.body.innerText), null, { timeout: 8000 });
+  ok('image with no payment: asked for the app screenshot or the details, nothing filled', /upload the screenshot from your payment app, or type the details yourself/.test(await pg.locator('body').innerText()) && (await pg.inputValue('#p_a')) === '');
+  await pg.click('[data-pclear]');
   await pg.setInputFiles('#pz input', { name: 'shot.png', mimeType: 'image/png', buffer: PNG });
   await pg.waitForFunction(() => document.getElementById('p_a') && document.getElementById('p_a').value === '5000', null, { timeout: 8000 });
   ok('dropped screenshot read: amount, date, time, transaction ID filled', await pg.inputValue('#p_a') === '5000' && await pg.inputValue('#p_r') === 'T2611251411ABCD');

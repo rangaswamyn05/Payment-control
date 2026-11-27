@@ -100,7 +100,7 @@ async function readShot(P, file, redraw) {
       if (p.mode === 'transfer' && P.mode === 'upi') P.mode = 'transfer';
       P.ocr = p.confidence;
       if (P.onRead) P.onRead(p);
-      P.ocrMsg = !p.txnId && P.mode !== 'cash' ? 'No transaction ID on this screenshot. Without it this cannot be saved. In GPay or PhonePe open the payment details (View details) and screenshot that, or type the ID.' : p.confidence === 'low' ? 'We could only read a little. Please check every field.' : 'We read these details. Please check them.';
+      P.ocrMsg = !p.amount && !p.txnId && P.mode !== 'cash' ? 'We could not find a payment in this image. Please upload the screenshot from your payment app, or type the details yourself.' : !p.txnId && P.mode !== 'cash' ? 'No transaction ID on this screenshot. Without it this cannot be saved. In GPay or PhonePe open the payment details (View details) and screenshot that, or type the ID.' : p.confidence === 'low' ? 'We could only read a little. Please check every field.' : 'We read these details. Please check them.';
     }
   } catch (ex) { P.err = ex.message || 'Could not use that image'; P.imageId = ''; P.preview = ''; }
   P.busy = false; redraw();

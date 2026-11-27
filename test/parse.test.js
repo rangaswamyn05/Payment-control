@@ -53,6 +53,11 @@ eq('PP2 amount', r.amount, 2000); eq('PP2 payee', r.payee, 'RACHANA SHIVANNA GOW
 // Real Paytm / PhonePe crop with a trailing symbol and "Ref, No"
 r = parseUpi('Rachana Shivanna Gowda P...\nUPI ID: ******3585@kotak\n~5,000 @\n19 Nov, 04:27PM \u00ab Ref, No: 319528516136 [Q\nCheck Balance Pay Again');
 eq('PT2 amount', r.amount, 5000); eq('PT2 ref', r.txnId, '319528516136'); eq('PT2 time', r.time, '16:27');
+// Not a payment: a payments-app home screen and a random photo read as nothing
+r = parseUpi('Google Pay\nSearch\nPay anyone\nSend money\nPay contacts\nBills & recharges\nBusiness\nSee all\nHome\nPay\nMoney');
+eq('N1 home screen: no amount, no id, no date', [r.amount, r.txnId, r.date, r.confidence], [null, null, null, 'low']);
+r = parseUpi('IMG_4821\nBeach at sunset');
+eq('N2 random photo: nothing found', [r.amount, r.txnId, r.date], [null, null, null]);
 const { parseSchedule } = require('../api/_lib/parse');
 eq('schedule rows with dates and amounts', parseSchedule('Sr Due date Amount\n1 05/12/2026 ₹50,000\n2 20 Jan 2027 ₹50,000\n3 2027-03-01 Rs 25,000.00'), [{ date: '2026-12-05', amount: 50000 }, { date: '2027-01-20', amount: 50000 }, { date: '2027-03-01', amount: 25000 }]);
 eq('schedule read as separate columns', parseSchedule('Date\n05/12/2026\n20/01/2027\nAmount\n50,000\n60,000'), [{ date: '2026-12-05', amount: 50000 }, { date: '2027-01-20', amount: 60000 }]);
