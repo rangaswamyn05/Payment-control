@@ -279,8 +279,10 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
     r0 = await call('POST', 'statement', { rows }, mg); ok('statement without an account choice is refused', r0.s === 400 && r0.j.needAccount === true, JSON.stringify(r0.j));
     r0 = await call('POST', 'statement', { rows, accountId: hdfc, headText: 'Account No: XXXXXXXX7777\nAccount Name: RAMESH PERSONAL' }, mg); ok('statement of a different account is refused', r0.s === 409 && r0.j.wrongAccount === true, JSON.stringify(r0.j));
     r0 = await call('POST', 'statement', { rows, accountId: hdfc, headText: '' }, mg); ok('file that does not show the account needs a confirmation', r0.s === 409 && r0.j.needConfirm === true, JSON.stringify(r0.j));
-    r0 = await call('POST', 'statement', { rows, accountId: hdfc, headText: 'A/c No: XXXXXXXX4321', }, mg); ok('statement showing the right account validates the payment', r0.s === 200 && r0.j.matched.length === 1, JSON.stringify(r0.j));
+    r0 = await call('POST', 'statement', { rows, accountId: hdfc, headText: 'A/c No: XXXXXXXX4321' }, mg); ok('digits alone are not enough: name and bank missing needs confirmation', r0.s === 409 && r0.j.needConfirm === true && r0.j.missing.length === 2, JSON.stringify(r0.j));
+    r0 = await call('POST', 'statement', { rows, accountId: hdfc, headText: 'HDFC Bank Statement\nAccount Name: HDFC Current\nA/c No: XXXXXXXX4321' }, mg); ok('statement showing digits, name and bank validates the payment', r0.s === 200 && r0.j.matched.length === 1, JSON.stringify(r0.j));
     r0 = await call('GET', 'summary?period=all&account=' + hdfc, null, mg); const inH = r0.j.received; r0 = await call('GET', 'summary?period=all&account=' + icici, null, mg); const inI = r0.j.received;
+    r0 = await call('GET', 'orders/acct-1', null, mg); ok('payment row says which account it was received in', (r0.j.payments || []).some(p => /Received in HDFC HDFC Current ····4321/.test(p.account || '')), JSON.stringify((r0.j.payments || []).map(p => p.account)));
     ok('summary can be limited to one account', inH >= 3000 && inI === 0, JSON.stringify([inH, inI]));
     r0 = await call('PUT', 'settings', { accounts: [] }, ow); }
   { // more than one business system

@@ -86,6 +86,11 @@ const tenDigits = x => { let d = digits(x); if (d.length === 12 && d.startsWith(
 const NOTE_MANUAL = 'Manually validated, not system validated';
 const NOTE_PROVIDE = 'Provide statements to validate';
 const NOTE_UNABLE = 'Unable to validate with the statements provided. Provide another statement.';
+function acctLabel(p, accs) {
+  if (p.mode === 'cash') return 'Cash';
+  const a = (accs || []).find(x => x.id === p.accountId);
+  return a ? 'Received in ' + (a.bank ? a.bank + ' ' : '') + a.name + ' ····' + a.last4 : '';
+}
 function payNote(p) {
   if (isSystem(p)) return 'Validated against the bank statement';
   if (isManual(p)) return NOTE_MANUAL;
@@ -575,8 +580,8 @@ async function route(req, res) {
     if (!o) throw new HttpErr(404, 'Order not found');
     const pays = await db.all('payments');
     if (!c && m === 'GET') {
-      const mineP = pays.filter(p => p.orderCode === o.code);
-      return send(res, 200, { order: orderView(o, pays), payments: mineP.reverse().map(p => ({ ...p, validationNote: payNote(p) })), invoice: !!(await db.all('invoices')).find(i => i.orderCode === o.code) });
+      const mineP = pays.filter(p => p.orderCode === o.code); const accsList = (await getSettings()).accounts;
+      return send(res, 200, { order: orderView(o, pays), payments: mineP.reverse().map(p => ({ ...p, validationNote: payNote(p), account: acctLabel(p, accsList) })), invoice: !!(await db.all('invoices')).find(i => i.orderCode === o.code) });
     }
     if (resubmitting) {
       if (o.status !== 'rejected') throw new HttpErr(400, 'Only a rejected order can be sent again');
@@ -903,11 +908,14 @@ async function route(req, res) {
       const head = String(body.headText || '').slice(0, 6000), low = head.toLowerCase();
       const shows = [...head.matchAll(/(?:a\/c|acct|account)[^\n\d]{0,30}((?:[\dXx*•\-\s]){6,24})/gi)].map(m => m[1].replace(/\D/g, '')).filter(d => d.length >= 4);
       const endsRight = new RegExp('(?:^|\\D)[\\dXx*•]{0,20}' + acct.last4 + '(?!\\d)').test(head);
-      const nameShown = acct.name.length >= 4 && low.includes(acct.name.toLowerCase());
-      if (shows.length && !shows.some(d => d.endsWith(acct.last4)) && !endsRight && !nameShown) throw new HttpErr(409, `This statement shows a different account (ending ${shows[0].slice(-4)}), not ${acct.name} ending ${acct.last4}. It may be a personal or another account. Nothing was marked validated.`, { wrongAccount: true });
-      if (endsRight || nameShown) acctProof = 'the account ending ' + acct.last4 + ' is shown on the statement';
-      else if (body.confirmed === true) acctProof = 'confirmed by ' + me.name + ' (the file does not show the account)';
-      else throw new HttpErr(409, `This file does not show which account it is for. Tick the box to confirm it is ${acct.name} ending ${acct.last4}.`, { needConfirm: true });
+      const words = t => String(t || '').toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length >= 3);
+      const nameShown = words(acct.name).length > 0 && words(acct.name).every(w => low.includes(w));
+      const bankShown = words(acct.bank).length > 0 && words(acct.bank).every(w => low.includes(w));
+      if (shows.length && !shows.some(d => d.endsWith(acct.last4)) && !endsRight) throw new HttpErr(409, `This statement shows a different account (ending ${shows[0].slice(-4)}), not ${acct.name} ending ${acct.last4}. It may be a personal or another account. Nothing was marked validated.`, { wrongAccount: true });
+      const missing = [!endsRight && 'last 4 digits', !nameShown && 'account name', !bankShown && 'bank name'].filter(Boolean);
+      if (!missing.length) acctProof = 'last 4 digits, account name and bank all shown on the statement';
+      else if (body.confirmed === true) acctProof = 'confirmed by ' + me.name + ' (the file does not show: ' + missing.join(', ') + ')';
+      else throw new HttpErr(409, `The statement does not show the ${missing.join(', ')} of ${acct.name} ending ${acct.last4}. If you are sure it is that account, tick the box to confirm.`, { needConfirm: true, missing });
     }
     if (rows.length > 5000) throw new HttpErr(400, 'Statement is too large. Upload one month at a time.');
     const dates = rows.map(r => r.date).sort();
@@ -924,7 +932,7 @@ async function route(req, res) {
     for (const p of sorted) { if (p._m) continue; const i = findRow(p, false); if (i >= 0) { used.add(i); p._m = { i, how: 'amount and date' }; } }
     for (const p of sorted) {
       if (p._m) {
-        await db.update('payments', p.id, { ...(acct ? { accountId: acct.id } : {}), status: 'verified', reason: '', verifyMethod: 'statement', stmtUnableAt: '', verifiedBy: me.name, verifiedAt: new Date().toISOString(), verifyNote: 'Matched on ' + p._m.how + ' with statement credit dated ' + rows[p._m.i].date + '. ' + matchChecks(p, rows[p._m.i]) });
+        await db.update('payments', p.id, { ...(acct ? { accountId: acct.id } : {}), status: 'verified', reason: '', verifyMethod: 'statement', stmtUnableAt: '', verifiedBy: me.name, verifiedAt: new Date().toISOString(), accountProof: acctProof, verifyNote: 'Matched on ' + p._m.how + ' with statement credit dated ' + rows[p._m.i].date + '. ' + matchChecks(p, rows[p._m.i]) });
         await audit(me, 'payment_verified_statement', 'payment', p.id, `${p.orderCode} ${p.amount} matched on ${p._m.how}`);
         matched.push({ id: p.id, orderCode: p.orderCode, amount: p.amount, how: p._m.how });
         await runConnectors('verified', { ...p, status: 'verified' }, allOrders.find(o => o.code === p.orderCode) || { code: p.orderCode }, me);
