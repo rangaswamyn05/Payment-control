@@ -25,6 +25,9 @@ const payRow = (cols, p, o, e) => pickCols(cols, PAY_COLS, PAY_DEFAULT).map(k =>
 const ordRow = (cols, o, e) => pickCols(cols, ORD_COLS, ORD_DEFAULT).map(k => ORD_COLS.find(c => c[0] === k)[2](o, e));
 const headRow = (all, cols, def) => pickCols(cols, all, def).map(k => all.find(c => c[0] === k)[1]);
 
+const API_FIELDS = [['payment_id', 'Payment ID', p => p.id], ['order_id', 'Order ID', (p, o) => o.code], ['amount', 'Amount', p => p.amount], ['mode', 'Payment mode', p => p.mode], ['date', 'Payment date', p => p.date], ['reference', 'Transaction ID', p => p.txnId || ''], ['status', 'Status', p => p.status], ['customer', 'Customer name', (p, o) => o.customer || ''], ['phone', 'Customer phone', (p, o) => o.phone || ''], ['payer', 'Payer name', p => p.payer || ''], ['order_total', 'Order total', (p, o) => o.total == null ? '' : o.total]];
+const API_DEFAULT = ['payment_id', 'order_id', 'amount', 'mode', 'date', 'reference', 'status'];
+const apiBody = (fields, event, payment, order) => { const o = { event }; for (const k of pickCols(fields, API_FIELDS, API_DEFAULT)) o[k] = API_FIELDS.find(f => f[0] === k)[2](payment, order); return o; };
 async function sendApi(api, event, payment, order) {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), 8000);
@@ -37,16 +40,7 @@ async function sendApi(api, event, payment, order) {
         Authorization: 'Bearer ' + (api.key || ''),
         'X-Idempotency-Key': payment.id + ':' + event,
       },
-      body: JSON.stringify({
-        event,
-        payment_id: payment.id,
-        order_id: order.code,
-        amount: payment.amount,
-        mode: payment.mode,
-        date: payment.date,
-        reference: payment.txnId || '',
-        status: payment.status,
-      }),
+      body: JSON.stringify(apiBody(api.fields, event, payment, order)),
     });
     return { connector: 'api', ok: r.ok, status: r.status };
   } catch (e) {
@@ -58,7 +52,7 @@ async function dispatch(event, payment, order, settings) {
   const results = [];
   const api = settings && settings.connectors && settings.connectors.api;
   if (api && apiOn(settings) && api.url && !validateUrl(api.url)) results.push(await sendApi(api, event, payment, order));
-  const extra = (settings && settings.connectors && settings.connectors.extra) || [];
+  const extra = ((settings && settings.connectors && settings.connectors.extra) || []).map(x => ({ ...x, fields: api && api.fields }));
   if (apiOn(settings)) for (const x of extra) if (x && x.url && !validateUrl(x.url)) results.push({ ...(await sendApi(x, event, payment, order)), name: x.name || '' });
   if (event !== 'test' && sheetOn(settings)) { const r = await appendRow('Payments', payRow(settings.sheet && settings.sheet.cols && settings.sheet.cols.payments, payment, order, event), sheetIdOf(settings)); if (r) results.push(r); }
   return results;
@@ -130,4 +124,4 @@ async function dispatchOrder(event, order, settings) {
   return r ? [r] : [];
 }
 
-module.exports = { dispatch, dispatchOrder, appendRow, sheetsConfig, validateUrl, sheetIdFromLink, prepareSheet, catalog, pickCols, PAY_COLS, ORD_COLS, PAY_DEFAULT, ORD_DEFAULT, payRow };
+module.exports = { dispatch, dispatchOrder, appendRow, sheetsConfig, validateUrl, sheetIdFromLink, prepareSheet, catalog, pickCols, PAY_COLS, ORD_COLS, PAY_DEFAULT, ORD_DEFAULT, payRow, API_FIELDS, API_DEFAULT };

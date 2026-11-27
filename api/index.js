@@ -4,7 +4,7 @@ const db = require('./_lib/db');
 const A = require('./_lib/auth');
 const { parseUpi, parseSchedule } = require('./_lib/parse');
 const { appendRow } = require('./_lib/connectors');
-const { dispatch, dispatchOrder, validateUrl, sheetIdFromLink, prepareSheet, sheetsConfig, catalog, pickCols, PAY_COLS, ORD_COLS, PAY_DEFAULT, ORD_DEFAULT, payRow } = require('./_lib/connectors');
+const { dispatch, dispatchOrder, validateUrl, sheetIdFromLink, prepareSheet, sheetsConfig, catalog, pickCols, PAY_COLS, ORD_COLS, PAY_DEFAULT, ORD_DEFAULT, payRow, API_FIELDS, API_DEFAULT } = require('./_lib/connectors');
 
 const RANK = { uploader: 1, manager: 2, owner: 3 };
 const VERIFIED = ['verified', 'cash_confirmed'];
@@ -162,7 +162,7 @@ async function getSettings() {
   const s = (await db.get('settings', 'main')) || { id: 'main' };
   return {
     id: 'main', businessName: s.businessName || '', managerEmails: s.managerEmails || [],
-    connectors: { api: { enabled: false, url: '', key: '', ...((s.connectors && s.connectors.api) || {}) }, extra: (s.connectors && Array.isArray(s.connectors.extra) ? s.connectors.extra : []).slice(0, 5) },
+    connectors: { api: { enabled: false, url: '', key: '', ...((s.connectors && s.connectors.api) || {}), fields: pickCols(s.connectors && s.connectors.api && s.connectors.api.fields, API_FIELDS, API_DEFAULT) }, extra: (s.connectors && Array.isArray(s.connectors.extra) ? s.connectors.extra : []).slice(0, 5) },
     storage: STORAGE.includes(s.storage) ? s.storage : 'app',
     orderIdMode: s.orderIdMode === 'auto' ? 'auto' : 'own',
     business: { name: '', taxId: '', taxNA: false, address: '', contact: '', gstRate: '', kind: '', industry: '', ...(s.business || {}) },
@@ -379,7 +379,7 @@ async function route(req, res) {
       const api = s.connectors.api;
       const base = { businessName: s.businessName, onboarded: s.onboarded, orderIdMode: s.orderIdMode, customerFields: s.customerFields, business: { name: s.business.name, taxNA: s.business.taxNA } };
       if (RANK[me.role] < RANK.manager) return send(res, 200, { settings: base });
-      return send(res, 200, { settings: { ...base, managerEmails: s.managerEmails, storage: s.storage, business: s.business, limits: s.limits, accounts: s.accounts, sheet: me.role === 'owner' ? { id: s.sheet.id, cols: s.sheet.cols } : {}, sheetCatalog: me.role === 'owner' ? catalog() : null, sheetEmail: me.role === 'owner' ? (process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || '') : '', sheetReady: !!sheetsConfig('x'), lastExportAt: s.lastExportAt, connectors: { api: { enabled: !!api.enabled, url: me.role === 'owner' ? api.url || '' : '', keySet: !!api.key }, extra: me.role === 'owner' ? s.connectors.extra.map(x => ({ id: x.id, name: x.name, url: x.url, keySet: !!x.key })) : [] } } });
+      return send(res, 200, { settings: { ...base, managerEmails: s.managerEmails, storage: s.storage, business: s.business, limits: s.limits, accounts: s.accounts, sheet: me.role === 'owner' ? { id: s.sheet.id, cols: s.sheet.cols } : {}, sheetCatalog: me.role === 'owner' ? catalog() : null, sheetEmail: me.role === 'owner' ? (process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || '') : '', sheetReady: !!sheetsConfig('x'), lastExportAt: s.lastExportAt, connectors: { api: { enabled: !!api.enabled, url: me.role === 'owner' ? api.url || '' : '', keySet: !!api.key, fields: api.fields }, apiCatalog: me.role === 'owner' ? API_FIELDS.map(f => ({ k: f[0], label: f[1] })) : [], extra: me.role === 'owner' ? s.connectors.extra.map(x => ({ id: x.id, name: x.name, url: x.url, keySet: !!x.key })) : [] } } });
     }
     if (m === 'PUT') {
       const me = await authed(req, url, 'owner');
@@ -396,7 +396,7 @@ async function route(req, res) {
       const next = {
         id: 'main', businessName: String(body.businessName !== undefined ? body.businessName : cur.businessName || biz.name).slice(0, 80),
         managerEmails: (Array.isArray(body.managerEmails) ? body.managerEmails : cur.managerEmails).map(x => String(x).trim()).filter(x => /^\S+@\S+\.\S+$/.test(x)).slice(0, 5),
-        connectors: { extra: (Array.isArray(body.extraSystems) ? body.extraSystems : cur.connectors.extra).slice(0, 5).map(x => { const old = cur.connectors.extra.find(o => o.id === x.id) || {}; const u = String(x.url || '').trim(); if (u) { const bad = validateUrl(u); if (bad) throw new HttpErr(400, bad + ' (' + String(x.name || u).slice(0, 30) + ')'); } return { id: String(x.id || '').replace(/[^\w]/g, '').slice(0, 20) || 'sys_' + Math.random().toString(36).slice(2, 8), name: String(x.name || '').trim().slice(0, 40), url: u, key: x.key ? String(x.key) : old.key || '' }; }).filter(x => x.url), api: { enabled: !!inApi.enabled, url: inApi.url !== undefined ? String(inApi.url).trim() : curApi.url || '', key: inApi.key ? String(inApi.key) : curApi.key || '' } },
+        connectors: { extra: (Array.isArray(body.extraSystems) ? body.extraSystems : cur.connectors.extra).slice(0, 5).map(x => { const old = cur.connectors.extra.find(o => o.id === x.id) || {}; const u = String(x.url || '').trim(); if (u) { const bad = validateUrl(u); if (bad) throw new HttpErr(400, bad + ' (' + String(x.name || u).slice(0, 30) + ')'); } return { id: String(x.id || '').replace(/[^\w]/g, '').slice(0, 20) || 'sys_' + Math.random().toString(36).slice(2, 8), name: String(x.name || '').trim().slice(0, 40), url: u, key: x.key ? String(x.key) : old.key || '' }; }).filter(x => x.url), api: { fields: pickCols(inApi.fields !== undefined ? inApi.fields : curApi.fields, API_FIELDS, API_DEFAULT), enabled: !!inApi.enabled, url: inApi.url !== undefined ? String(inApi.url).trim() : curApi.url || '', key: inApi.key ? String(inApi.key) : curApi.key || '' } },
         storage: STORAGE.includes(body.storage) ? body.storage : cur.storage,
         orderIdMode: body.orderIdMode === 'auto' || body.orderIdMode === 'own' ? body.orderIdMode : cur.orderIdMode,
         business: biz, customerFields: cf,
