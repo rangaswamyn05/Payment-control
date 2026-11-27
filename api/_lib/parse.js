@@ -24,6 +24,22 @@ function mk(y, mo, d, h, mi, ap) {
 
 function parseDate(text) {
   let m;
+  // 22 Nov, 12:13 PM   (no year on the screen: this year, or last year if that would be in the future)
+  m = new RegExp('(?:^|[^\\d])(\\d{1,2})(?:st|nd|rd|th)?[\\s\\-]+' + MON + '[a-z]*\\s*,\\s*(\\d{1,2})[:.](\\d{2})\\s*([ap])\\.?m\\b', 'i').exec(text);
+  if (m) {
+    const now = new Date(); let y = now.getFullYear();
+    const r0 = mk(y, MONTHS[m[2].slice(0, 3).toLowerCase()], +m[1], m[3], m[4], m[5]);
+    if (r0 && new Date(r0.date + 'T00:00:00') - now > 2 * 86400000) return mk(y - 1, MONTHS[m[2].slice(0, 3).toLowerCase()], +m[1], m[3], m[4], m[5]);
+    return r0;
+  }
+  // Paid at 5:35PM, 23 Nov '26 IST   (time first, two-digit year after an apostrophe)
+  m = new RegExp('(\\d{1,2})[:.](\\d{2})\\s*([ap])\\.?m\\.?[\\s,]+(?:on\\s+)?(\\d{1,2})(?:st|nd|rd|th)?[\\s\\-\\/,]+' + MON + '[a-z]*[\\s\\-\\/,]*[\'\u2018\u2019]\\s?(\\d{2})(?!\\d)', 'i').exec(text);
+  if (m) return mk(2000 + +m[6], MONTHS[m[5].slice(0, 3).toLowerCase()], +m[4], m[1], m[2], m[3]);
+  m = new RegExp('(\\d{1,2})(?:st|nd|rd|th)?[\\s\\-\\/,]+' + MON + '[a-z]*[\\s\\-\\/,]*[\'\u2018\u2019]\\s?(\\d{2})(?!\\d)' + TIME, 'i').exec(text);
+  if (m) return mk(2000 + +m[3], MONTHS[m[2].slice(0, 3).toLowerCase()], +m[1], m[4], m[5], m[6]);
+  // 09:33 am on 21 Nov 2026   (time first)
+  m = new RegExp('(\\d{1,2})[:.](\\d{2})\\s*([ap])\\.?m\\.?[\\s,]+(?:on\\s+)?(\\d{1,2})(?:st|nd|rd|th)?[\\s\\-\\/,]+' + MON + '[a-z]*[\\s\\-\\/,]+(\\d{4})', 'i').exec(text);
+  if (m) return mk(+m[6], MONTHS[m[5].slice(0, 3).toLowerCase()], +m[4], m[1], m[2], m[3]);
   // 25 November 2026, 2:11 pm   /  24 Nov 2026 at 10:03 PM
   m = new RegExp('(\\d{1,2})(?:st|nd|rd|th)?[\\s\\-\\/,]+' + MON + '[a-z]*[\\s\\-\\/,]+(\\d{4})' + TIME, 'i').exec(text);
   if (m) return mk(+m[3], MONTHS[m[2].slice(0, 3).toLowerCase()], +m[1], m[4], m[5], m[6]);
@@ -51,6 +67,7 @@ function findAmounts(text) {
   while ((m = re.exec(text))) { const n = toNum(m[1]); if (n > 0) out.push(n); }
   if (out.length) return out;
   out.unsure = true; // no rupee sign found: the number may carry a misread sign (₹5,000 read as 25,000)
+  { const pm = /\bPaid\s+([0-9][0-9,]*(?:\.\d{1,2})?)(?![0-9,.])(?![ \t]*(?:to|at|via|on)\b)/i.exec(text); if (pm && toNum(pm[1]) > 0) { out.push(toNum(pm[1])); return out; } }
   // OCR sometimes drops the rupee sign: use a line that is only a number
   for (const l of text.split(/\n/)) {
     const mm = /^\s*\+?\s*([0-9][0-9,]*(?:\.\d{1,2})?)\s*$/.exec(l);
@@ -59,7 +76,7 @@ function findAmounts(text) {
   if (out.length) return out;
   // the rupee sign is often read as a stray symbol or letter (% ¥ € Z = ?): accept that in front of a lone amount
   for (const l of text.split(/\n/)) {
-    const mm = /^\s*[+\-]?\s*(?:[^\w\s.,]|[zZ])\s*([0-9][0-9,]*(?:\.\d{1,2})?)\s*$/.exec(l);
+    const mm = /^\s*[+\-]?\s*(?:[^\w\s.,]|[zZ])\s*([0-9][0-9,]*(?:\.\d{1,2})?)\s*[^\w\s]*\s*$/.exec(l);
     if (mm && mm[1].replace(/[,.]/g, '').length <= 9) { const n = toNum(mm[1]); if (n > 0) out.push(n); }
   }
   if (out.length) return out;
@@ -80,7 +97,7 @@ function lineAfter(lines, re) {
     const out = [];
     if (same && /^[A-Za-z][A-Za-z .'&\-]{2,}$/.test(same)) out.push(same);
     for (let j = i + 1; j < lines.length && out.length < 3; j++) {
-      const l = lines[j].trim();
+      const l = lines[j].trim().replace(/[\s_%₹=]*[0-9][0-9,]*(?:\.\d{1,2})?\s*$/, '').replace(/[_\s]+$/, '');
       if (!l) continue;
       if (/^[A-Za-z][A-Za-z .'&\-]{2,}$/.test(l) && !STOP.test(l) && !/\bbank\b/i.test(l)) out.push(l); else break;
     }
@@ -122,12 +139,14 @@ function parseUpi(raw) {
 
   // Transaction / reference id (needs a digit so words such as "Completed" are not taken)
   const idRes = [
-    /(?:UPI\s*)?(?:Transaction|Txn|Trans\.?)\s*(?:ID|No\.?|Ref(?:erence)?(?:\s*(?:No\.?|ID))?)\s*[:\-]?\s*([A-Za-z0-9]{8,25})/i,
+    /(?:UPI\s*)?(?:Transaction|Txn|Trans\.?|\bTr\.?)\s*(?:ID|No\.?|Ref(?:erence)?(?:\s*(?:No\.?|ID))?)\s*[:\-]?\s*([A-Za-z0-9]{8,25})/i,
     /\bUTR\s*(?:No\.?|Number)?\s*[:\-]?\s*([A-Za-z0-9]{8,25})/i,
     /UPI\s*Ref(?:erence)?(?:\s*(?:No\.?|ID|Number))?\s*[:\-]?\s*([A-Za-z0-9]{8,25})/i,
-    /\bRef(?:erence)?\s*(?:No\.?|ID|Number)\s*[:\-]?\s*([A-Za-z0-9]{8,25})/i,
+    /\bRef(?:erence)?[.,]?\s*(?:No\.?|ID|Number)\s*[:\-]?\s*([A-Za-z0-9]{8,25})/i,
   ];
+  { const sp = /\bRef(?:erence)?[.,]?\s*(?:No\.?|ID|Number)\s*[:\-]?\s*(\d{3,6}(?:\s\d{3,6}){1,4})(?!\d)/i.exec(flat); if (sp && sp[1].replace(/\s/g, '').length >= 10) out.txnId = sp[1].replace(/\s/g, ''); }
   for (const re of idRes) {
+    if (out.txnId) break;
     const g = new RegExp(re.source, 'gi'); let m;
     while ((m = g.exec(flat))) { if (/\d/.test(m[1])) { out.txnId = m[1]; break; } }
     if (out.txnId) break;
@@ -160,6 +179,12 @@ function parseUpi(raw) {
       const c = cleanSender(cand);
       if (c && /^[A-Za-z][A-Za-z .'&\-]{2,}$/.test(c) && !STOP.test(c) && !/transaction|\bid\b/i.test(c)) out.payer = c;
     }
+  }
+
+  // Paytm card: the sender's name sits just above "HDFC Bank - 4189"
+  if (!out.payer) {
+    const bi = lines.findIndex(l => /\bbank\s*[-\u2013]\s*\d{4}\s*$/i.test(l));
+    if (bi > 0 && /^[A-Za-z][A-Za-z .'&\-]{2,}$/.test(lines[bi - 1]) && !STOP.test(lines[bi - 1])) out.payer = lines[bi - 1];
   }
 
   if (/\bcredited\b|received\s+from|money\s+received/i.test(flat)) out.direction = 'credit';

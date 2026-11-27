@@ -39,6 +39,20 @@ eq('K3 payer is not "Transaction ID"', r.payer, 'BHARATHI C'); eq('K3 date', r.d
 // Real GPay dark "details" screen: the payer line carries the bank in brackets
 r = parseUpi('To rachana patil\n$91 sores «3585,\n%2,000\nphotoshoot adv\n@ Completed\n23 Nov 2026, 8:01pm\nUPI transaction ID\n632739967036\nTo: RACHANA S PATIL\nla~1@okhdfcbank on Google Pay\nFrom: DINESHWARAN C (ICICI Bank)\n+++sluva@okicici on Google Pay\nGoogle transaction ID\nCICAgPibjNXbUA');
 eq('G2 amount', r.amount, 2000); eq('G2 txn is the UPI id', r.txnId, '632739967036'); eq('G2 date', [r.date, r.time], ['2026-11-23', '20:01']); eq('G2 payer', r.payer, 'DINESHWARAN C');
+// Real ICICI "Payment successful!" card: time before the date, two-digit year, "Tr. ID"
+r = parseUpi('Payment successful!\n25,000\nTo RACHANA SHIVANNA GOWDA PATIL\n9731853585@kotak\nFrom SEENU ANJANAIAH\nseenu.a4455@icici\nPaid at 5:35PM, 23 Nov \'26 IST\nTr. ID: 111267979197');
+eq('I1 date and time', [r.date, r.time], ['2026-11-23', '17:35']); eq('I1 txn (Tr. ID)', r.txnId, '111267979197'); eq('I1 payer', r.payer, 'SEENU ANJANAIAH'); eq('I1 payee', r.payee, 'RACHANA SHIVANNA GOWDA PATIL'); eq('I1 amount flagged, 5,000 offered', [r.amountUnsure, r.altAmount], [true, 5000]);
+// Real Paytm card: no year, spaced reference number, sender name above the bank
+r = parseUpi('Payim\nRachana Shivanna Gow...\n******X 358 5@kotak\n*2,000\nTwo Thousand Rupees\nPaid Successfully @\nShweta Singh\ni= HDFC Bank - 4189\n22 Nov, 12:13 PM | Ref No: 3197 3145 6048');
+eq('T1 amount', r.amount, 2000); eq('T1 ref no with spaces', r.txnId, '319731456048'); eq('T1 date has day, month and time', [r.date && r.date.slice(5), r.time], ['11-22', '12:13']); eq('T1 payer', r.payer, 'Shweta Singh');
+// Real slice receipt and two PhonePe "Transaction Successful" cards (name shares a line with the amount)
+r = parseUpi('Paid 1,000\nTo Rachana Shivanna Gowda\nPatil\n22 Nov \u201826, 09:12 am\nNotes: Payment from slice\nFrom: slice savings\nUPI Ref ID\n632645158678');
+eq('SL1 amount', r.amount, 1000); eq('SL1 date', [r.date, r.time], ['2026-11-22', '09:12']); eq('SL1 ref', r.txnId, '632645158678');
+r = parseUpi('Transaction Successful\n09:33 am on 21 Nov 2026\nPaid to\nRACHANA SHIVANNA %2,000\nGOWDA PATIL\ne000003585@kotak\nPhonePe Transaction ID\nT2611210932581721202362\nUTR: 544313603237');
+eq('PP2 amount', r.amount, 2000); eq('PP2 payee', r.payee, 'RACHANA SHIVANNA GOWDA PATIL'); eq('PP2 txn', r.txnId, 'T2611210932581721202362'); eq('PP2 date', [r.date, r.time], ['2026-11-21', '09:33']);
+// Real Paytm / PhonePe crop with a trailing symbol and "Ref, No"
+r = parseUpi('Rachana Shivanna Gowda P...\nUPI ID: ******3585@kotak\n~5,000 @\n19 Nov, 04:27PM \u00ab Ref, No: 319528516136 [Q\nCheck Balance Pay Again');
+eq('PT2 amount', r.amount, 5000); eq('PT2 ref', r.txnId, '319528516136'); eq('PT2 time', r.time, '16:27');
 const { parseSchedule } = require('../api/_lib/parse');
 eq('schedule rows with dates and amounts', parseSchedule('Sr Due date Amount\n1 05/12/2026 ₹50,000\n2 20 Jan 2027 ₹50,000\n3 2027-03-01 Rs 25,000.00'), [{ date: '2026-12-05', amount: 50000 }, { date: '2027-01-20', amount: 50000 }, { date: '2027-03-01', amount: 25000 }]);
 eq('schedule read as separate columns', parseSchedule('Date\n05/12/2026\n20/01/2027\nAmount\n50,000\n60,000'), [{ date: '2026-12-05', amount: 50000 }, { date: '2027-01-20', amount: 60000 }]);
