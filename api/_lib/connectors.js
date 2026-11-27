@@ -13,6 +13,18 @@ function validateUrl(u) {
   return null;
 }
 
+
+// Columns the business can choose for its Google Sheet (in this order). Defaults match what was sent before.
+const PAY_COLS = [['time', 'Time added', (p, o, e) => new Date().toISOString()], ['event', 'Event', (p, o, e) => e], ['paymentId', 'Payment ID', p => p.id], ['order', 'Order ID', (p, o) => o.code], ['customer', 'Customer name', (p, o) => o.customer || ''], ['phone', 'Customer phone', (p, o) => o.phone || ''], ['amount', 'Amount', p => p.amount], ['mode', 'Payment mode', p => p.mode], ['date', 'Payment date', p => p.date], ['txnId', 'Transaction ID', p => p.txnId || ''], ['payer', 'Payer name', p => p.payer || ''], ['status', 'Status', p => p.status], ['enteredBy', 'Entered by', p => p.createdByName || ''], ['orderTotal', 'Order total', (p, o) => o.total == null ? '' : o.total]];
+const ORD_COLS = [['time', 'Time added', () => new Date().toISOString()], ['event', 'Event', (o, e) => e], ['order', 'Order ID', o => o.code], ['customer', 'Customer name', o => o.customer || ''], ['phone', 'Customer phone', o => o.phone || ''], ['total', 'Order total', o => o.total == null ? '' : o.total], ['enteredBy', 'Entered by', o => o.createdBy || ''], ['approvedBy', 'Approved by', o => o.approvedBy || '']];
+const PAY_DEFAULT = ['time', 'event', 'paymentId', 'order', 'amount', 'mode', 'date', 'txnId', 'status'];
+const ORD_DEFAULT = ['time', 'event', 'order', 'customer', 'total', 'enteredBy', 'approvedBy'];
+const catalog = () => ({ payments: PAY_COLS.map(c => ({ k: c[0], label: c[1] })), orders: ORD_COLS.map(c => ({ k: c[0], label: c[1] })), paymentsDefault: PAY_DEFAULT, ordersDefault: ORD_DEFAULT });
+function pickCols(list, all, def) { const ok = (Array.isArray(list) ? list : []).filter(k => all.some(c => c[0] === k)); return ok.length ? [...new Set(ok)] : def; }
+const payRow = (cols, p, o, e) => pickCols(cols, PAY_COLS, PAY_DEFAULT).map(k => PAY_COLS.find(c => c[0] === k)[2](p, o, e));
+const ordRow = (cols, o, e) => pickCols(cols, ORD_COLS, ORD_DEFAULT).map(k => ORD_COLS.find(c => c[0] === k)[2](o, e));
+const headRow = (all, cols, def) => pickCols(cols, all, def).map(k => all.find(c => c[0] === k)[1]);
+
 async function sendApi(api, event, payment, order) {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), 8000);
@@ -48,7 +60,7 @@ async function dispatch(event, payment, order, settings) {
   if (api && apiOn(settings) && api.url && !validateUrl(api.url)) results.push(await sendApi(api, event, payment, order));
   const extra = (settings && settings.connectors && settings.connectors.extra) || [];
   if (apiOn(settings)) for (const x of extra) if (x && x.url && !validateUrl(x.url)) results.push({ ...(await sendApi(x, event, payment, order)), name: x.name || '' });
-  if (event !== 'test' && sheetOn(settings)) { const r = await appendRow('Payments', [new Date().toISOString(), event, payment.id, order.code, payment.amount, payment.mode, payment.date, payment.txnId || '', payment.status], sheetIdOf(settings)); if (r) results.push(r); }
+  if (event !== 'test' && sheetOn(settings)) { const r = await appendRow('Payments', payRow(settings.sheet && settings.sheet.cols && settings.sheet.cols.payments, payment, order, event), sheetIdOf(settings)); if (r) results.push(r); }
   return results;
 }
 
@@ -89,7 +101,7 @@ async function appendRow(tab, row, sid) {
 const sheetIdOf = st => (st && st.sheet && st.sheet.id) || '';
 const sheetOn = st => !!st && (['app_sheet', 'all'].includes(st.storage) || !!sheetIdOf(st));
 function sheetIdFromLink(x) { const m = /\/spreadsheets\/d\/([\w-]{20,})/.exec(String(x || '')); return m ? m[1] : (/^[\w-]{30,}$/.test(String(x || '').trim()) ? String(x).trim() : ''); }
-async function prepareSheet(sid) {
+async function prepareSheet(sid, cols) {
   const c = sheetsConfig(sid); if (!c) return { ok: false, error: 'Google Sheets is not switched on for this app yet' };
   try {
     const t = await sheetsToken(c), base = process.env.ALLOW_LOCAL_CONNECTORS === '1' && process.env.SHEETS_API_BASE ? process.env.SHEETS_API_BASE : 'https://sheets.googleapis.com';
@@ -103,14 +115,19 @@ async function prepareSheet(sid) {
     const have = ((await m.json()).sheets || []).map(x => x.properties.title);
     const need = ['Payments', 'Orders'].filter(x => !have.includes(x));
     if (need.length) { const b = await fetch(`${base}/v4/spreadsheets/${encodeURIComponent(sid)}:batchUpdate`, { method: 'POST', headers: h, body: JSON.stringify({ requests: need.map(title => ({ addSheet: { properties: { title } } })) }) }); if (!b.ok) return { ok: false, status: b.status, error: 'Could not add the Payments and Orders tabs. Is the email an Editor?' }; }
+    for (const [tab, hd] of [['Payments', headRow(PAY_COLS, cols && cols.payments, PAY_DEFAULT)], ['Orders', headRow(ORD_COLS, cols && cols.orders, ORD_DEFAULT)]]) {
+      const g = await fetch(`${base}/v4/spreadsheets/${encodeURIComponent(sid)}/values/${encodeURIComponent(tab)}!A1:A1`, { headers: h });
+      const gv = g.ok ? await g.json().catch(() => ({})) : {};
+      if (g.ok && !(gv.values && gv.values.length)) await fetch(`${base}/v4/spreadsheets/${encodeURIComponent(sid)}/values/${encodeURIComponent(tab)}!A1?valueInputOption=RAW`, { method: 'PUT', headers: h, body: JSON.stringify({ values: [hd] }) });
+    }
     return { ok: true };
   } catch (e) { return { ok: false, error: String(e && e.message || e).slice(0, 120) }; }
 }
 const apiOn = st => !!(st && st.connectors && st.connectors.api && st.connectors.api.enabled) || (!!st && ['app_api', 'all'].includes(st.storage));
 async function dispatchOrder(event, order, settings) {
   if (!sheetOn(settings)) return [];
-  const r = await appendRow('Orders', [new Date().toISOString(), event, order.code, order.customer, order.total, order.createdBy || '', order.approvedBy || ''], sheetIdOf(settings));
+  const r = await appendRow('Orders', ordRow(settings.sheet && settings.sheet.cols && settings.sheet.cols.orders, order, event), sheetIdOf(settings));
   return r ? [r] : [];
 }
 
-module.exports = { dispatch, dispatchOrder, appendRow, sheetsConfig, validateUrl, sheetIdFromLink, prepareSheet };
+module.exports = { dispatch, dispatchOrder, appendRow, sheetsConfig, validateUrl, sheetIdFromLink, prepareSheet, catalog, pickCols, PAY_COLS, ORD_COLS, PAY_DEFAULT, ORD_DEFAULT, payRow };

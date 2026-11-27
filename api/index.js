@@ -4,7 +4,7 @@ const db = require('./_lib/db');
 const A = require('./_lib/auth');
 const { parseUpi, parseSchedule } = require('./_lib/parse');
 const { appendRow } = require('./_lib/connectors');
-const { dispatch, dispatchOrder, validateUrl, sheetIdFromLink, prepareSheet, sheetsConfig } = require('./_lib/connectors');
+const { dispatch, dispatchOrder, validateUrl, sheetIdFromLink, prepareSheet, sheetsConfig, catalog, pickCols, PAY_COLS, ORD_COLS, PAY_DEFAULT, ORD_DEFAULT, payRow } = require('./_lib/connectors');
 
 const RANK = { uploader: 1, manager: 2, owner: 3 };
 const VERIFIED = ['verified', 'cash_confirmed'];
@@ -168,7 +168,7 @@ async function getSettings() {
     business: { name: '', taxId: '', taxNA: false, address: '', contact: '', gstRate: '', kind: '', industry: '', ...(s.business || {}) },
     customerFields: Array.isArray(s.customerFields) ? s.customerFields : [],
     limits: { singlePayment: 0, collectionThreshold: 0, ...(s.limits || {}) },
-    sheet: { id: String((s.sheet && s.sheet.id) || '').slice(0, 80) },
+    sheet: { id: String((s.sheet && s.sheet.id) || '').slice(0, 80), cols: { payments: pickCols(s.sheet && s.sheet.cols && s.sheet.cols.payments, PAY_COLS, PAY_DEFAULT), orders: pickCols(s.sheet && s.sheet.cols && s.sheet.cols.orders, ORD_COLS, ORD_DEFAULT) } },
     accounts: (Array.isArray(s.accounts) ? s.accounts : []).slice(0, 10).map(a => ({ id: String(a.id || ''), name: String(a.name || ''), bank: String(a.bank || ''), last4: String(a.last4 || ''), upi: (Array.isArray(a.upi) ? a.upi : []).map(x => String(x).trim().toLowerCase()).filter(x => /^[\w.\-]{2,}@[a-z]{2,}$/.test(x)).slice(0, 5) })).filter(a => a.id && a.name && /^\d{4}$/.test(a.last4)),
     onboarded: !!s.onboarded, invoiceSampleId: s.invoiceSampleId || '', lastExportAt: s.lastExportAt || '', lastExportById: s.lastExportById || '',
   };
@@ -379,7 +379,7 @@ async function route(req, res) {
       const api = s.connectors.api;
       const base = { businessName: s.businessName, onboarded: s.onboarded, orderIdMode: s.orderIdMode, customerFields: s.customerFields, business: { name: s.business.name, taxNA: s.business.taxNA } };
       if (RANK[me.role] < RANK.manager) return send(res, 200, { settings: base });
-      return send(res, 200, { settings: { ...base, managerEmails: s.managerEmails, storage: s.storage, business: s.business, limits: s.limits, accounts: s.accounts, sheet: me.role === 'owner' ? { id: s.sheet.id } : {}, sheetEmail: me.role === 'owner' ? (process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || '') : '', sheetReady: !!sheetsConfig('x'), lastExportAt: s.lastExportAt, connectors: { api: { enabled: !!api.enabled, url: me.role === 'owner' ? api.url || '' : '', keySet: !!api.key }, extra: me.role === 'owner' ? s.connectors.extra.map(x => ({ id: x.id, name: x.name, url: x.url, keySet: !!x.key })) : [] } } });
+      return send(res, 200, { settings: { ...base, managerEmails: s.managerEmails, storage: s.storage, business: s.business, limits: s.limits, accounts: s.accounts, sheet: me.role === 'owner' ? { id: s.sheet.id, cols: s.sheet.cols } : {}, sheetCatalog: me.role === 'owner' ? catalog() : null, sheetEmail: me.role === 'owner' ? (process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || '') : '', sheetReady: !!sheetsConfig('x'), lastExportAt: s.lastExportAt, connectors: { api: { enabled: !!api.enabled, url: me.role === 'owner' ? api.url || '' : '', keySet: !!api.key }, extra: me.role === 'owner' ? s.connectors.extra.map(x => ({ id: x.id, name: x.name, url: x.url, keySet: !!x.key })) : [] } } });
     }
     if (m === 'PUT') {
       const me = await authed(req, url, 'owner');
@@ -400,7 +400,7 @@ async function route(req, res) {
         storage: STORAGE.includes(body.storage) ? body.storage : cur.storage,
         orderIdMode: body.orderIdMode === 'auto' || body.orderIdMode === 'own' ? body.orderIdMode : cur.orderIdMode,
         business: biz, customerFields: cf,
-        sheet: { id: body.sheetLink !== undefined ? (String(body.sheetLink).trim() ? (sheetIdFromLink(body.sheetLink) || (() => { throw new HttpErr(400, 'That is not a Google Sheet link'); })()) : '') : cur.sheet.id },
+        sheet: { id: body.sheetLink !== undefined ? (String(body.sheetLink).trim() ? (sheetIdFromLink(body.sheetLink) || (() => { throw new HttpErr(400, 'That is not a Google Sheet link'); })()) : '') : cur.sheet.id, cols: body.sheetCols ? { payments: pickCols(body.sheetCols.payments, PAY_COLS, PAY_DEFAULT), orders: pickCols(body.sheetCols.orders, ORD_COLS, ORD_DEFAULT) } : cur.sheet.cols },
         accounts: (() => { const inp = Array.isArray(body.accounts) ? body.accounts : cur.accounts; return inp.slice(0, 10).map(a => { const last4 = String(a.last4 || '').replace(/\D/g, ''); if (String(a.name || '').trim() && !/^\d{4}$/.test(last4)) throw new HttpErr(400, 'Enter the last 4 digits of the account number for ' + String(a.name).trim()); return { id: String(a.id || '').replace(/[^\w]/g, '').slice(0, 20) || 'acc_' + Math.random().toString(36).slice(2, 8), name: String(a.name || '').trim().slice(0, 40), bank: String(a.bank || '').trim().slice(0, 40), last4, upi: (Array.isArray(a.upi) ? a.upi : String(a.upi || '').split(/[,\s]+/)).map(x => String(x).trim().toLowerCase()).filter(x => /^[\w.\-]{2,}@[a-z]{2,}$/.test(x)).slice(0, 5) }; }).filter(a => a.name); })(),
         limits: { singlePayment: Math.max(0, r2(lm.singlePayment) || 0), collectionThreshold: Math.max(0, r2(lm.collectionThreshold) || 0) },
         onboarded: body.onboarded !== undefined ? !!body.onboarded : cur.onboarded, invoiceSampleId: body.invoiceSampleId !== undefined ? String(body.invoiceSampleId).slice(0, 40) : cur.invoiceSampleId, lastExportAt: cur.lastExportAt, lastExportById: cur.lastExportById,
@@ -415,9 +415,9 @@ async function route(req, res) {
       const me = await authed(req, url, 'owner');
       const s = await getSettings();
       if (!s.sheet.id) throw new HttpErr(400, 'Save the Google Sheet link first');
-      const pr = await prepareSheet(s.sheet.id);
+      const pr = await prepareSheet(s.sheet.id, s.sheet.cols);
       if (!pr.ok) return send(res, 200, { ok: false, error: pr.error });
-      const r = await appendRow('Payments', [new Date().toISOString(), 'test', 'TEST', 'TEST', 1, 'upi', '', 'TEST', 'test'], s.sheet.id);
+      const r = await appendRow('Payments', payRow(s.sheet.cols.payments, { id: 'TEST', amount: 1, mode: 'upi', date: '', txnId: 'TEST', status: 'test', payer: 'Test', createdByName: me.name }, { code: 'TEST', customer: 'Test customer', phone: '', total: 1 }, 'test'), s.sheet.id);
       await audit(me, 'sheet_test', 'settings', 'main', JSON.stringify(r || {}));
       return send(res, 200, { ok: !!(r && r.ok), error: r && r.ok ? '' : 'Google did not accept the row' });
     }

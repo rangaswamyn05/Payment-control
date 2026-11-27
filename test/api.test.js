@@ -211,6 +211,12 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
     const { sheetsConfig } = require('../api/_lib/connectors'); const c0 = sheetsConfig('x');
     ok('whole JSON key file is accepted', !!c0 && c0.key.includes('BEGIN PRIVATE KEY') && c0.email === 'svc@test.iam');
     process.env.GOOGLE_SERVICE_ACCOUNT_KEY = keep; }
+  { // choose the sheet's columns
+    let c0 = await call('PUT', 'settings', { sheetCols: { payments: ['order', 'customer', 'amount', 'bogus'], orders: ['order', 'total'] } }, ow); ok('owner picks sheet columns', c0.s === 200);
+    c0 = await call('GET', 'settings', null, ow); ok('chosen columns kept, unknown dropped; catalogue offered', c0.j.settings.sheet.cols.payments.join() === 'order,customer,amount' && c0.j.settings.sheetCatalog.payments.length > 9, JSON.stringify(c0.j.settings.sheet.cols));
+    const { payRow } = require('../api/_lib/connectors');
+    ok('row follows the chosen columns', payRow(['order', 'customer', 'amount'], { amount: 500 }, { code: 'A1', customer: 'Ravi' }, 'x').join() === 'A1,Ravi,500');
+    await call('PUT', 'settings', { sheetCols: { payments: [], orders: [] } }, ow); }
   gm.close();
   { const img2 = (await call('POST', 'images', { dataUrl: PNG }, up)).j.id;
   const fp = (n, amt) => ({ mode: 'upi', amount: String(amt), date: '2026-11-25T10:00', txnId: 'PLANTXN' + n, imageId: img2 });
