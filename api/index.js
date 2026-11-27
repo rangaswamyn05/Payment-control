@@ -84,8 +84,8 @@ const digits = x => String(x || '').replace(/\D/g, '');
 // Indian mobile number: exactly 10 digits, with an optional +91 or 0 in front. Returns the 10 digits or ''.
 const tenDigits = x => { let d = digits(x); if (d.length === 12 && d.startsWith('91')) d = d.slice(2); else if (d.length === 11 && d.startsWith('0')) d = d.slice(1); return d.length === 10 ? d : ''; };
 const NOTE_MANUAL = 'Manually validated, not system validated';
-const NOTE_PROVIDE = 'Provide statements to validate';
-const NOTE_UNABLE = 'Unable to validate with the statements provided. Provide another statement.';
+const NOTE_PROVIDE = 'Upload a statement to validate this payment';
+const NOTE_UNABLE = 'Unable to validate with the statements provided. Upload another statement, or a manager can review it manually.';
 function unitsOf(u) { const n = Number(String(u == null ? '' : u).replace(/,/g, '')); return Number.isFinite(n) && n > 0 && n <= 1e7 ? Math.round(n * 1000) / 1000 : 0; }
 function acctLabel(p, accs) {
   if (p.mode === 'cash') return 'Cash';
@@ -94,8 +94,9 @@ function acctLabel(p, accs) {
 }
 function payNote(p) {
   if (isSystem(p)) return 'Validated against the bank statement';
+  if (p.mode === 'cash' && isManual(p)) return 'Cash: validated manually by the owner. No bank statement can match cash';
   if (isManual(p)) return NOTE_MANUAL;
-  if (p.status === 'client_reported') return p.stmtUnableAt ? NOTE_UNABLE : NOTE_PROVIDE;
+  if (p.status === 'client_reported') return p.stmtUnableAt ? 'Unable to validate: ' + (p.stmtReason || 'not found in the statement provided') + '. Upload another statement, or a manager can review it manually.' : NOTE_PROVIDE;
   if (p.status === 'cash_pending') return 'Waiting for the owner to approve cash';
   return '';
 }
@@ -941,9 +942,12 @@ async function route(req, res) {
         await runConnectors('verified', { ...p, status: 'verified' }, allOrders.find(o => o.code === p.orderCode) || { code: p.orderCode }, me);
         await autoClose(me, p.orderCode);
       } else if (p.status === 'client_reported') {
-        await db.update('payments', p.id, { stmtUnableAt: new Date().toISOString() });
+        const sameId = p.txnId ? rows.find(r => (r.ref + ' ' + r.desc).toLowerCase().includes(p.txnId.toLowerCase())) : null;
+        const sameAmt = rows.find(r => Math.abs(r.amount - p.amount) < 0.005);
+        const why = sameId && Math.abs(sameId.amount - p.amount) >= 0.005 ? `the bank credit with this transaction ID is ${inr(sameId.amount)}, not ${inr(p.amount)}` : sameAmt && p.txnId ? 'a credit of the same amount exists but its transaction ID does not match' : sameAmt ? 'a credit of the same amount exists but there is no transaction ID to confirm it' : p.txnId ? `no bank credit with this transaction ID or amount between ${from} and ${to}` : `no bank credit of this amount between ${from} and ${to}`;
+        await db.update('payments', p.id, { stmtUnableAt: new Date().toISOString(), stmtReason: why });
         await audit(me, 'payment_unable_to_validate', 'payment', p.id, `${p.orderCode} ${p.amount} not found in statement ${from} to ${to}`);
-        flagged.push({ id: p.id, orderCode: p.orderCode, amount: p.amount });
+        flagged.push({ id: p.id, orderCode: p.orderCode, amount: p.amount, reason: why });
       }
     }
     const unmatchedCredits = rows.filter((r, i) => !used.has(i));

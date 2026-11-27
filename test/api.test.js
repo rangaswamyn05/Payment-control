@@ -69,7 +69,7 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
   r = await call('GET', 'payments/mine', null, up); ok('uploader sees own submissions only, no status or totals', r.s === 200 && r.j.payments.length === 2 && r.j.payments[0].status === undefined);
 
   // dashboard states
-  r = await call('GET', 'orders/DEMO-1001', null, mg); ok('order shows collected, outstanding, validation pending', r.j.order.collected === 35000 && r.j.order.outstanding === 65000 && r.j.order.validation === 'pending' && /Provide statements/.test(r.j.order.validationNote), JSON.stringify(r.j.order));
+  r = await call('GET', 'orders/DEMO-1001', null, mg); ok('order shows collected, outstanding, validation pending', r.j.order.collected === 35000 && r.j.order.outstanding === 65000 && r.j.order.validation === 'pending' && /Upload a statement/.test(r.j.order.validationNote), JSON.stringify(r.j.order));
   r = await call('POST', 'statement', { rows: [{ date: '2026-11-25', amount: 1234, ref: 'OTHER', desc: 'x' }, { date: '2026-11-25', amount: 5000, ref: '', desc: 'NEFT0002 from client' }] }, mg);
   ok('statement matches the 5000 by transaction ID, the 30000 is only "unable to validate", not flagged wrong', r.j.matched.length === 1 && r.j.matched[0].how === 'reference' && r.j.flagged.length === 1 && r.j.flagged[0].amount === 30000, JSON.stringify(r.j));
   r = await call('GET', 'orders/DEMO-1001', null, mg); ok('order: 5000 validated, 30000 not validated, note says unable to validate', r.j.order.validated === 5000 && r.j.order.notValidated === 30000 && r.j.order.validation === 'unable' && r.j.order.flaggedCount === 0 && /Unable to validate/.test(r.j.order.validationNote), JSON.stringify(r.j.order));
@@ -237,6 +237,13 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
     ok('order created with product and units', o8.s === 200, JSON.stringify(o8.j).slice(0, 200));
     const lk = await call('GET', 'orders/lookup/item-1', null, up); ok('lookup shows the item for Add payment', lk.j.item === 'Wedding album' && lk.j.units === 2, JSON.stringify(lk.j));
     const o9b = await call('POST', 'orders', { phone: P(), code: 'item-2', customer: 'x', item: 'Photo shoot', units: '-3', total: 500, firstPayment: { mode: 'upi', amount: '100', date: '2026-11-25T10:00', txnId: 'ITEM0002', imageId: (await call('POST', 'images', { dataUrl: PNG }, up)).j.id } }, up); const lk2 = await call('GET', 'orders/lookup/item-2', null, up); ok('bad units are ignored, not refused', o9b.s === 200 && lk2.j.units === 0 && lk2.j.item === 'Photo shoot', JSON.stringify(lk2.j)); }
+  { // unable-to-validate gives a reason
+    const imgU = (await call('POST', 'images', { dataUrl: PNG }, up)).j.id;
+    await call('POST', 'orders', { phone: P(), code: 'un-1', customer: 'x', total: 700, firstPayment: { mode: 'upi', amount: '700', date: '2026-11-25T10:00', txnId: 'UN000777', imageId: imgU } }, up); await call('POST', 'orders/un-1/approve', {}, ow);
+    await call('PUT', 'settings', { accounts: [] }, ow);
+    const ur = await call('POST', 'statement', { rows: [{ date: '2026-11-24', amount: 5, ref: 'X', desc: 'x' }, { date: '2026-11-26', amount: 650, ref: 'UN000777', desc: 'UPI' }] }, mg);
+    ok('unmatched payment gets a reason', ur.s === 200 && ur.j.flagged.some(f => f.orderCode === 'un-1' && /transaction ID is .*650/.test(f.reason)), JSON.stringify(ur.j.flagged));
+    const ud = (await call('GET', 'orders/un-1', null, mg)).j; ok('payment note says unable and why', (ud.payments || []).some(p => /Unable to validate: the bank credit with this transaction ID/.test(p.validationNote || '')), JSON.stringify((ud.payments || []).map(p => p.validationNote))); }
   gm.close();
   { const img2 = (await call('POST', 'images', { dataUrl: PNG }, up)).j.id;
   const fp = (n, amt) => ({ mode: 'upi', amount: String(amt), date: '2026-11-25T10:00', txnId: 'PLANTXN' + n, imageId: img2 });

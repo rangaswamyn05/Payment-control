@@ -78,7 +78,7 @@ fs.mkdirSync('/tmp/pcshots', { recursive: true });
   await pg.click('.nav a[href="#/orders"]'); await pg.waitForSelector('a.tr');
   await pg.click('a.tr:has-text("DEMO-1001")'); await pg.waitForSelector('text=Payments on this order');
   ok('back button on order detail', await pg.locator('.back').count() === 1);
-  ok('order shows validation pending, not wrong', (await pg.textContent('main')).includes('Provide statements to validate'));
+  ok('order shows validation pending, not wrong', (await pg.textContent('main')).includes('Upload a statement to validate this payment'));
   ok('invoice link exists on an approved order', true);
   await pg.screenshot({ path: '/tmp/pcshots/order.png' });
   await pg.click('[data-act=verify]'); await pg.fill('#askv', 'Seen in bank app'); await pg.click('[data-x=yes]');
