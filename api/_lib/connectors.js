@@ -95,7 +95,11 @@ async function prepareSheet(sid) {
     const t = await sheetsToken(c), base = process.env.ALLOW_LOCAL_CONNECTORS === '1' && process.env.SHEETS_API_BASE ? process.env.SHEETS_API_BASE : 'https://sheets.googleapis.com';
     const h = { Authorization: 'Bearer ' + t, 'Content-Type': 'application/json' };
     const m = await fetch(`${base}/v4/spreadsheets/${encodeURIComponent(sid)}?fields=sheets.properties.title`, { headers: h });
-    if (!m.ok) return { ok: false, status: m.status, error: m.status === 404 || m.status === 403 ? 'Cannot open that sheet. Share it with the email shown, as Editor' : 'Google answered ' + m.status };
+    if (!m.ok) {
+      const gj = await m.json().catch(() => ({})), gm = String((gj.error && gj.error.message) || '');
+      if (/has not been used|is disabled|accessNotConfigured/i.test(gm + JSON.stringify(gj.error || {}))) return { ok: false, status: m.status, error: 'The Google Sheets API is switched off in your Google Cloud project. Open APIs and Services, Library, search Google Sheets API, and click Enable' };
+      return { ok: false, status: m.status, error: m.status === 404 || m.status === 403 ? 'Cannot open that sheet. Share it with the email shown, as Editor, and paste the full link' : 'Google answered ' + m.status + (gm ? ': ' + gm.slice(0, 90) : '') };
+    }
     const have = ((await m.json()).sheets || []).map(x => x.properties.title);
     const need = ['Payments', 'Orders'].filter(x => !have.includes(x));
     if (need.length) { const b = await fetch(`${base}/v4/spreadsheets/${encodeURIComponent(sid)}:batchUpdate`, { method: 'POST', headers: h, body: JSON.stringify({ requests: need.map(title => ({ addSheet: { properties: { title } } })) }) }); if (!b.ok) return { ok: false, status: b.status, error: 'Could not add the Payments and Orders tabs. Is the email an Editor?' }; }
