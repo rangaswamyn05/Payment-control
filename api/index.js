@@ -158,6 +158,17 @@ function normDate(d) {
 }
 
 const STORAGE = ['app', 'app_sheet', 'app_api', 'all'];
+// Supporting checks reported on every statement match (they never block a match).
+function matchChecks(p, row) {
+  const d = Math.abs(Math.floor(Date.parse(String(row.date).slice(0, 10) + 'T00:00:00Z') / 86400000) - Math.floor(Date.parse(String(p.date).slice(0, 10) + 'T00:00:00Z') / 86400000));
+  const dt = isNaN(d) ? 'Date not compared.' : d === 0 ? 'Date: same day.' : d === 1 ? 'Date: 1 day apart (normal for late-night or holiday credits).' : 'Date: ' + d + ' days apart, please look.';
+  const hay = (String(row.ref || '') + ' ' + String(row.desc || '')).toLowerCase();
+  const words = [p.orderCode, ...String(p.note || '').split(/[^\w-]+/), ...String(p.payer || '').split(/\s+/)].map(x => String(x || '').trim().toLowerCase()).filter(x => x.length >= 4);
+  const hit = words.find(w => hay.includes(w));
+  const rm = !words.length ? 'Remarks: none to compare.' : hit ? 'Remarks agree ("' + hit + '" is in the bank narration).' : 'Remarks: not found in the bank narration.';
+  return dt + ' ' + rm;
+}
+
 async function getSettings() {
   const s = (await db.get('settings', 'main')) || { id: 'main' };
   return {
@@ -913,7 +924,7 @@ async function route(req, res) {
     for (const p of sorted) { if (p._m) continue; const i = findRow(p, false); if (i >= 0) { used.add(i); p._m = { i, how: 'amount and date' }; } }
     for (const p of sorted) {
       if (p._m) {
-        await db.update('payments', p.id, { ...(acct ? { accountId: acct.id } : {}), status: 'verified', reason: '', verifyMethod: 'statement', stmtUnableAt: '', verifiedBy: me.name, verifiedAt: new Date().toISOString(), verifyNote: 'Matched on ' + p._m.how + ' with statement credit dated ' + rows[p._m.i].date });
+        await db.update('payments', p.id, { ...(acct ? { accountId: acct.id } : {}), status: 'verified', reason: '', verifyMethod: 'statement', stmtUnableAt: '', verifiedBy: me.name, verifiedAt: new Date().toISOString(), verifyNote: 'Matched on ' + p._m.how + ' with statement credit dated ' + rows[p._m.i].date + '. ' + matchChecks(p, rows[p._m.i]) });
         await audit(me, 'payment_verified_statement', 'payment', p.id, `${p.orderCode} ${p.amount} matched on ${p._m.how}`);
         matched.push({ id: p.id, orderCode: p.orderCode, amount: p.amount, how: p._m.how });
         await runConnectors('verified', { ...p, status: 'verified' }, allOrders.find(o => o.code === p.orderCode) || { code: p.orderCode }, me);

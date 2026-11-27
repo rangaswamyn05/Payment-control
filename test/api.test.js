@@ -225,6 +225,13 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
     let c2 = await call('PUT', 'settings', { extraSystems: [{ name: 'CRM', url: 'https://crm.example.com/h', fields: ['order_id', 'phone'] }, { name: 'Books', url: 'https://books.example.com/h' }] }, ow); ok('save systems with their own fields', c2.s === 200);
     c2 = await call('GET', 'settings', null, ow); const ex2 = c2.j.settings.connectors.extra; ok('each system keeps its own fields; default for the other', ex2[0].fields.join() === 'order_id,phone' && ex2[1].fields.length === 7, JSON.stringify(ex2));
     await call('PUT', 'settings', { extraSystems: [] }, ow); }
+  { // supporting checks are reported on a match
+    const { } = {};
+    const o9 = await call('POST', 'orders', { phone: P(), code: 'rm-1', customer: 'x', total: 800, firstPayment: { mode: 'upi', amount: '800', date: '2026-11-25T10:00', txnId: 'RM000111', imageId: (await call('POST', 'images', { dataUrl: PNG }, up)).j.id, note: 'rm-1 advance' } }, up); await call('POST', 'orders/rm-1/approve', {}, ow);
+    await call('PUT', 'settings', { accounts: [] }, ow);
+    const sr = await call('POST', 'statement', { rows: [{ date: '2026-11-24', amount: 5, ref: 'X', desc: 'x' }, { date: '2026-11-26', amount: 800, ref: 'RM000111', desc: 'UPI/RM000111/rm-1 advance' }] }, mg); ok('statement matches rm-1', sr.s === 200 && sr.j.matched.some(m => m.orderCode === 'rm-1'), JSON.stringify(sr.j));
+    const pr9 = (await call('GET', 'orders/rm-1', null, mg)).j; const pp = JSON.stringify(pr9);
+    ok('match note reports date and remarks checks', /1 day apart/.test(pp) && /Remarks agree/.test(pp), pp.slice(0, 300)); }
   gm.close();
   { const img2 = (await call('POST', 'images', { dataUrl: PNG }, up)).j.id;
   const fp = (n, amt) => ({ mode: 'upi', amount: String(amt), date: '2026-11-25T10:00', txnId: 'PLANTXN' + n, imageId: img2 });
