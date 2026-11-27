@@ -52,7 +52,7 @@ async function dispatch(event, payment, order, settings) {
   const results = [];
   const api = settings && settings.connectors && settings.connectors.api;
   if (api && apiOn(settings) && api.url && !validateUrl(api.url)) results.push(await sendApi(api, event, payment, order));
-  const extra = ((settings && settings.connectors && settings.connectors.extra) || []).map(x => ({ ...x, fields: api && api.fields }));
+  const extra = ((settings && settings.connectors && settings.connectors.extra) || []);
   if (apiOn(settings)) for (const x of extra) if (x && x.url && !validateUrl(x.url)) results.push({ ...(await sendApi(x, event, payment, order)), name: x.name || '' });
   if (event !== 'test' && sheetOn(settings)) { const r = await appendRow('Payments', payRow(settings.sheet && settings.sheet.cols && settings.sheet.cols.payments, payment, order, event), sheetIdOf(settings)); if (r) results.push(r); }
   return results;

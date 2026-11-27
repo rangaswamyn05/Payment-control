@@ -221,6 +221,10 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
     let c1 = await call('PUT', 'settings', { connectors: { api: { enabled: false, fields: ['order_id', 'amount', 'customer', 'nope'] } } }, ow); ok('owner picks what systems receive', c1.s === 200, JSON.stringify(c1.j));
     c1 = await call('GET', 'settings', null, ow); ok('fields kept, unknown dropped', c1.j.settings.connectors.api.fields.join() === 'order_id,amount,customer' && c1.j.settings.connectors.apiCatalog.length > 8, JSON.stringify(c1.j.settings.connectors.api));
     await call('PUT', 'settings', { connectors: { api: { enabled: false, fields: [] } } }, ow); }
+  { // each added system has its own fields
+    let c2 = await call('PUT', 'settings', { extraSystems: [{ name: 'CRM', url: 'https://crm.example.com/h', fields: ['order_id', 'phone'] }, { name: 'Books', url: 'https://books.example.com/h' }] }, ow); ok('save systems with their own fields', c2.s === 200);
+    c2 = await call('GET', 'settings', null, ow); const ex2 = c2.j.settings.connectors.extra; ok('each system keeps its own fields; default for the other', ex2[0].fields.join() === 'order_id,phone' && ex2[1].fields.length === 7, JSON.stringify(ex2));
+    await call('PUT', 'settings', { extraSystems: [] }, ow); }
   gm.close();
   { const img2 = (await call('POST', 'images', { dataUrl: PNG }, up)).j.id;
   const fp = (n, amt) => ({ mode: 'upi', amount: String(amt), date: '2026-11-25T10:00', txnId: 'PLANTXN' + n, imageId: img2 });
