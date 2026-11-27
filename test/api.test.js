@@ -256,7 +256,9 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
     f0 = await call('POST', 'ideas', { type: 'feedback', label: 'idea', text: 'Add reminders by email' }, up); ok('anyone can send feedback', f0.s === 200, JSON.stringify(f0.j));
     f0 = await call('POST', 'ideas', { type: 'problem', text: 'Manual Excel entry for every payment', manualSteps: 'Typing into Excel' }, ow); ok('owner sends a business problem', f0.s === 200);
     f0 = await call('POST', 'ideas', { type: 'feedback', text: 'x' }, up); ok('empty feedback refused', f0.s === 400);
-    f0 = await call('GET', 'ideas', null, up); ok('uploader sees only their own', f0.j.ideas.length === 1 && f0.j.ideas[0].type === 'feedback', JSON.stringify(f0.j));
+    f0 = await call('POST', 'ideas', { type: 'feedback', rating: 'up' }, up); ok('a thumbs up alone is accepted', f0.s === 200, JSON.stringify(f0.j));
+    f0 = await call('GET', 'ideas', null, up); ok('thumb saved', f0.j.ideas.some(i => i.rating === 'up'));
+    f0 = await call('GET', 'ideas', null, up); ok('uploader sees only their own', f0.j.ideas.length === 2 && f0.j.ideas[0].type === 'feedback', JSON.stringify(f0.j));
     f0 = await call('GET', 'ideas', null, ow); ok('owner sees all', f0.j.ideas.length >= 2);
     f0 = await call('GET', 'requests', null, mg); ok('ideas do not appear in approval requests', !(f0.j.requests || []).some(r => r.kind === 'idea')); }
   gm.close();

@@ -795,16 +795,17 @@ async function route(req, res) {
   if (a === 'ideas') {
     const me = await authed(req, url, 'uploader');
     const all = (await db.all('requests')).filter(r => r.kind === 'idea');
-    if (!b && m === 'GET') return send(res, 200, { ideas: (me.role === 'owner' ? all : all.filter(r => r.byId === me.id)).reverse().map(r => ({ id: r.id, type: r.type, text: r.text, manualSteps: r.manualSteps || '', flowImageId: r.flowImageId || '', by: r.by, status: r.status, reply: r.reply || '', created: r.created })) });
+    if (!b && m === 'GET') return send(res, 200, { ideas: (me.role === 'owner' ? all : all.filter(r => r.byId === me.id)).reverse().map(r => ({ id: r.id, type: r.type, text: r.text, manualSteps: r.manualSteps || '', flowImageId: r.flowImageId || '', rating: r.rating || '', by: r.by, status: r.status, reply: r.reply || '', created: r.created })) });
     if (!b && m === 'POST') {
       const body = await readBody(req);
       const type = body.type === 'problem' ? 'problem' : 'feedback';
       if (type === 'problem' && RANK[me.role] < RANK.manager) throw new HttpErr(403, 'Only owners and managers can send a business problem');
       const text = String(body.text || '').trim().slice(0, 2000);
-      if (text.length < 5 && !body.flowImageId) throw new HttpErr(400, 'Write a few words, or upload your flow');
+      const rating = body.rating === 'up' || body.rating === 'down' ? body.rating : '';
+      if (text.length < 5 && !body.flowImageId && !rating) throw new HttpErr(400, 'Write a few words, or upload your flow');
       const flowImageId = body.flowImageId && (await db.get('images', String(body.flowImageId))) ? String(body.flowImageId) : '';
       const kindLabel = ['idea', 'broken', 'confusing', 'praise'].includes(body.label) ? body.label : '';
-      const r = await db.insert('requests', { kind: 'idea', type, label: kindLabel, text, manualSteps: String(body.manualSteps || '').trim().slice(0, 2000), flowImageId, by: me.name, byId: me.id, byRole: me.role, status: 'received', reply: '' });
+      const r = await db.insert('requests', { kind: 'idea', type, label: kindLabel, rating, text, manualSteps: String(body.manualSteps || '').trim().slice(0, 2000), flowImageId, by: me.name, byId: me.id, byRole: me.role, status: 'received', reply: '' });
       await audit(me, type === 'problem' ? 'business_problem_sent' : 'feedback_sent', 'idea', r.id, text.slice(0, 80));
       return send(res, 200, { ok: true, id: r.id });
     }
