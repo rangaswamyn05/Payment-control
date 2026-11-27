@@ -183,7 +183,7 @@ async function getSettings() {
     connectors: { api: { enabled: false, url: '', key: '', ...((s.connectors && s.connectors.api) || {}), fields: pickCols(s.connectors && s.connectors.api && s.connectors.api.fields, API_FIELDS, API_DEFAULT) }, extra: (s.connectors && Array.isArray(s.connectors.extra) ? s.connectors.extra : []).slice(0, 5) },
     storage: STORAGE.includes(s.storage) ? s.storage : 'app',
     orderIdMode: s.orderIdMode === 'auto' ? 'auto' : 'own',
-    business: { name: '', taxId: '', taxNA: false, noInvoice: false, address: '', contact: '', gstRate: '', gstMode: '', gstPct: '', kind: '', industry: '', ...(s.business || {}) },
+    business: { name: '', taxId: '', taxNA: false, noInvoice: false, invoiceMode: 'order', address: '', contact: '', gstRate: '', gstMode: '', gstPct: '', kind: '', industry: '', ...(s.business || {}) },
     customerFields: Array.isArray(s.customerFields) ? s.customerFields : [],
     limits: { singlePayment: 0, collectionThreshold: 0, ...(s.limits || {}) },
     sheet: { id: String((s.sheet && s.sheet.id) || '').slice(0, 80), cols: { payments: pickCols(s.sheet && s.sheet.cols && s.sheet.cols.payments, PAY_COLS, PAY_DEFAULT), orders: pickCols(s.sheet && s.sheet.cols && s.sheet.cols.orders, ORD_COLS, ORD_DEFAULT) } },
@@ -302,7 +302,7 @@ async function applyAdjust(me, o, r, settings) {
 }
 
 function esc(x) { return String(x == null ? '' : x).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
-function invoiceHtml(o, v, inv, settings, pays) {
+function invoiceHtml(o, v, inv, settings, pays, single) {
   const b = settings.business;
   const gm = b.gstRate === 'GST registered (regular)' ? b.gstMode : '', gr = Number(b.gstPct) || 0, split = p => { const r = gr; if (gm === 'incl') { const g = r2(p.amount * r / (100 + r)); return { net: r2(p.amount - g), gst: g, tot: p.amount }; } if (gm === 'excl') { const g = r2(p.amount * r / 100); return { net: p.amount, gst: g, tot: r2(p.amount + g) }; } return { net: p.amount, gst: 0, tot: p.amount }; };
   const live = pays.filter(p => p.status !== 'rejected'), sp = live.map(split);
@@ -313,7 +313,7 @@ function invoiceHtml(o, v, inv, settings, pays) {
 <div style="display:flex;justify-content:space-between"><div><h1>${esc(b.name || settings.businessName || 'Invoice')}</h1><div>${esc(b.address)}</div><div>${esc(b.contact)}</div><div>${b.taxNA ? '' : 'GST / Tax no: ' + esc(b.taxId)}</div></div><div style="text-align:right"><div class="big">Invoice ${esc(inv.no)}</div><div>${esc(String(inv.created || '').slice(0, 10))}</div></div></div>
 <hr><div><b>Bill to:</b> ${esc(o.customer)}</div>${extra}<div>Phone: ${esc(o.phone || '')}</div><div>Order: ${esc(o.code)}</div>${o.item ? `<div>Product / service: <b>${esc(o.item)}</b>${o.units ? ' &times; ' + esc(String(o.units)) + ' unit' + (o.units === 1 ? '' : 's') : ''}</div>` : ''}
 <table><tr><th>Date</th><th>Mode</th><th class="r">Amount before GST</th><th class="r">GST</th><th class="r">Total</th></tr>${rows}<tr><td colspan="2"><b>Total</b></td><td class="r"><b>${esc(inr(tn))}</b></td><td class="r"><b>${esc(inr(tg))}</b></td><td class="r"><b>${esc(inr(tt))}</b></td></tr></table>
-<table><tr><td>Order total</td><td class="r big">${esc(inr(o.total))}</td></tr><tr><td>Paid so far</td><td class="r">${esc(inr(v.collected))}</td></tr><tr><td>Balance</td><td class="r big">${esc(inr(v.outstanding))}</td></tr></table>
+<table><tr><td>Order total</td><td class="r big">${esc(inr(o.total))}</td></tr><tr><td>${single ? 'Paid up to this payment' : 'Paid so far'}</td><td class="r">${esc(inr(v.collected))}</td></tr><tr><td>Balance</td><td class="r big">${esc(inr(v.outstanding))}</td></tr></table>
 <p class="np"><button onclick="print()">Print or save as PDF</button></p></body></html>`;
 }
 
@@ -410,7 +410,7 @@ async function route(req, res) {
       const inApi = (body.connectors && body.connectors.api) || {};
       if (inApi.url) { const bad = validateUrl(inApi.url); if (bad) throw new HttpErr(400, bad); }
       const bz = body.business || cur.business;
-      const biz = { name: String(bz.name || '').slice(0, 80), taxNA: !!bz.taxNA, noInvoice: !!bz.taxNA && !!bz.noInvoice, taxId: String(bz.taxId || '').trim().slice(0, 30), address: String(bz.address || '').slice(0, 200), contact: String(bz.contact || '').slice(0, 120), gstRate: String(bz.gstRate || '').slice(0, 40), gstMode: bz.gstMode === 'incl' || bz.gstMode === 'excl' ? bz.gstMode : '', gstPct: bz.gstPct !== undefined && bz.gstPct !== '' && Number(bz.gstPct) >= 0 && Number(bz.gstPct) <= 100 ? String(Number(bz.gstPct)) : '', kind: String(bz.kind || '').slice(0, 40), industry: String(bz.industry || '').slice(0, 40) };
+      const biz = { name: String(bz.name || '').slice(0, 80), taxNA: !!bz.taxNA, noInvoice: !!bz.taxNA && !!bz.noInvoice, invoiceMode: bz.invoiceMode === 'payment' ? 'payment' : 'order', taxId: String(bz.taxId || '').trim().slice(0, 30), address: String(bz.address || '').slice(0, 200), contact: String(bz.contact || '').slice(0, 120), gstRate: String(bz.gstRate || '').slice(0, 40), gstMode: bz.gstMode === 'incl' || bz.gstMode === 'excl' ? bz.gstMode : '', gstPct: bz.gstPct !== undefined && bz.gstPct !== '' && Number(bz.gstPct) >= 0 && Number(bz.gstPct) <= 100 ? String(Number(bz.gstPct)) : '', kind: String(bz.kind || '').slice(0, 40), industry: String(bz.industry || '').slice(0, 40) };
       if (body.onboarded && !biz.taxNA && !biz.taxId) throw new HttpErr(400, 'Enter your GST or tax number, or tick that GST or tax is not applicable to your business');
       const cf = (Array.isArray(body.customerFields) ? body.customerFields : cur.customerFields).slice(0, 6).map(f => ({ label: String(f.label || '').trim().slice(0, 30) })).filter(f => f.label).map((f, i) => ({ label: f.label, key: 'f' + i + '_' + f.label.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 12) }));
       const lm = body.limits || cur.limits;
@@ -595,7 +595,7 @@ async function route(req, res) {
     const pays = await db.all('payments');
     if (!c && m === 'GET') {
       const mineP = pays.filter(p => p.orderCode === o.code); const accsList = (await getSettings()).accounts;
-      return send(res, 200, { order: orderView(o, pays), payments: mineP.reverse().map(p => ({ ...p, validationNote: payNote(p), account: acctLabel(p, accsList) })), invoice: !!(await db.all('invoices')).find(i => i.orderCode === o.code) });
+      return send(res, 200, { order: orderView(o, pays), payments: mineP.reverse().map(p => ({ ...p, validationNote: payNote(p), account: acctLabel(p, accsList) })), invoice: !!(await db.all('invoices')).find(i => i.orderCode === o.code), invoiceMode: (settings.business && settings.business.invoiceMode) || 'order' });
     }
     if (resubmitting) {
       if (o.status !== 'rejected') throw new HttpErr(400, 'Only a rejected order can be sent again');
@@ -851,7 +851,10 @@ async function route(req, res) {
     if (!o || !inv) throw new HttpErr(404, 'No invoice for this order yet');
     const pays = (await db.all('payments')).filter(p => p.orderCode === o.code);
     res.statusCode = 200; res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    return res.end(invoiceHtml(o, orderView(o, pays), inv, await getSettings(), pays));
+    const st = await getSettings(), pid = url.searchParams.get('p'), one = pid ? pays.find(x => x.id === pid && x.status !== 'rejected') : null;
+    if (pid && !one) throw new HttpErr(404, 'No such payment on this order');
+    if (one) { const upto = pays.filter(x => x.status !== 'rejected' && (x.seq || 0) <= (one.seq || 0)); const vv = orderView(o, upto); return res.end(invoiceHtml(o, vv, { ...inv, no: inv.no + '-' + (one.seq || 1) }, st, [one], true)); }
+    return res.end(invoiceHtml(o, orderView(o, pays), inv, st, pays));
   }
 
   // ----- reports (owner)

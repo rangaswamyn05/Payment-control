@@ -327,6 +327,13 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
     g = await call('GET', 'settings', null, ow); ok('"no invoices" choice is kept when tax is not applicable', g.j.settings.business.noInvoice === true);
     await call('PUT', 'settings', { business: { name: 'Acme', address: 'x', taxId: '1', taxNA: false, noInvoice: true } }, ow);
     g = await call('GET', 'settings', null, ow); ok('"no invoices" is dropped when GST applies', g.j.settings.business.noInvoice === false); }
+  { // invoice per payment
+    await call('PUT', 'settings', { business: { name: 'Acme', address: 'x', taxId: '1', gstRate: 'GST registered (regular)', gstMode: 'excl', gstPct: '18', invoiceMode: 'payment' } }, ow);
+    const ol = await call('GET', 'orders', null, ow); const oc = (ol.j.orders || ol.j || []).find ? (ol.j.orders || ol.j).find(x => x.code) : null;
+    if (oc) { const od = await call('GET', 'orders/' + encodeURIComponent(oc.code), null, ow); ok('order says invoices are per payment', od.j.invoiceMode === 'payment');
+      const pay = (od.j.payments || []).find(x => x.status !== 'rejected');
+      if (pay && od.j.invoice) { const r = await fetch(base + '/api/invoices/' + encodeURIComponent(oc.code) + '?p=' + pay.id + '&t=' + ow, {}); const h = await r.text(); ok('payment invoice shows its own number and GST on top', r.status === 200 && /INV-[^<]*-\d/.test(h) && /18%/.test(h), String(r.status)); } }
+    await call('PUT', 'settings', { business: { name: 'Acme', address: 'x', taxId: '1', gstRate: 'GST registered (regular)', gstMode: 'excl', gstPct: '18', invoiceMode: 'order' } }, ow); }
   { // sample invoice as a PDF
     const PDF = 'data:application/pdf;base64,JVBERi0xLjQKMSAwIG9iajw8Pj5lbmRvYmoKdHJhaWxlcjw8Pj4KJSVFT0Y=', NOTPDF = 'data:application/pdf;base64,aGVsbG8gbm90IGEgcGRmIGF0IGFsbA==';
     let r3 = await call('POST', 'images', { dataUrl: PDF, kind: 'sample' }, ow); ok('owner can upload a PDF as the sample invoice', r3.s === 200 && !!r3.j.id, JSON.stringify(r3.j));
