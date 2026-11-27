@@ -250,7 +250,7 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
     const mkd = async (code, n, dt) => { await call('POST', 'orders', { phone: P(), code, customer: 'x', total: 5000, nextDue: dt, firstPayment: { mode: 'upi', amount: '1000', date: '2026-11-25T10:00', txnId: 'DUE0000' + n, imageId: imgD } }, up); await call('POST', 'orders/' + code + '/approve', {}, ow); };
     await mkd('due-a', 1, past); await mkd('due-b', 2, tomorrow); await mkd('due-c', 3, far);
     const sm = await call('GET', 'summary?period=all', null, mg); const dz = sm.j.dues || [];
-    ok('dashboard lists overdue and next-7-day dues, not far ones', dz.some(x => x.code === 'due-a' && x.bucket === 'overdue') && dz.some(x => x.code === 'due-b' && x.bucket === 'week') && !dz.some(x => x.code === 'due-c'), JSON.stringify(dz)); }
+    ok('dashboard lists overdue and tomorrow dues, not far ones', dz.some(x => x.code === 'due-a' && x.bucket === 'overdue') && dz.some(x => x.code === 'due-b' && x.bucket === 'tomorrow') && !dz.some(x => x.code === 'due-c'), JSON.stringify(dz)); }
   gm.close();
   { const img2 = (await call('POST', 'images', { dataUrl: PNG }, up)).j.id;
   const fp = (n, amt) => ({ mode: 'upi', amount: String(amt), date: '2026-11-25T10:00', txnId: 'PLANTXN' + n, imageId: img2 });
