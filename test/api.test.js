@@ -232,6 +232,11 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
     const sr = await call('POST', 'statement', { rows: [{ date: '2026-11-24', amount: 5, ref: 'X', desc: 'x' }, { date: '2026-11-26', amount: 800, ref: 'RM000111', desc: 'UPI/RM000111/rm-1 advance' }] }, mg); ok('statement matches rm-1', sr.s === 200 && sr.j.matched.some(m => m.orderCode === 'rm-1'), JSON.stringify(sr.j));
     const pr9 = (await call('GET', 'orders/rm-1', null, mg)).j; const pp = JSON.stringify(pr9);
     ok('match note reports date and remarks checks', /1 day apart/.test(pp) && /Remarks agree/.test(pp), pp.slice(0, 300)); }
+  { // product or service and units
+    const o8 = await call('POST', 'orders', { phone: P(), code: 'item-1', customer: 'x', item: 'Wedding album', units: '2', total: 9000, firstPayment: { mode: 'upi', amount: '1000', date: '2026-11-25T10:00', txnId: 'ITEM0001', imageId: (await call('POST', 'images', { dataUrl: PNG }, up)).j.id } }, up);
+    ok('order created with product and units', o8.s === 200, JSON.stringify(o8.j).slice(0, 200));
+    const lk = await call('GET', 'orders/lookup/item-1', null, up); ok('lookup shows the item for Add payment', lk.j.item === 'Wedding album' && lk.j.units === 2, JSON.stringify(lk.j));
+    const o9b = await call('POST', 'orders', { phone: P(), code: 'item-2', customer: 'x', item: 'Photo shoot', units: '-3', total: 500, firstPayment: { mode: 'upi', amount: '100', date: '2026-11-25T10:00', txnId: 'ITEM0002', imageId: (await call('POST', 'images', { dataUrl: PNG }, up)).j.id } }, up); const lk2 = await call('GET', 'orders/lookup/item-2', null, up); ok('bad units are ignored, not refused', o9b.s === 200 && lk2.j.units === 0 && lk2.j.item === 'Photo shoot', JSON.stringify(lk2.j)); }
   gm.close();
   { const img2 = (await call('POST', 'images', { dataUrl: PNG }, up)).j.id;
   const fp = (n, amt) => ({ mode: 'upi', amount: String(amt), date: '2026-11-25T10:00', txnId: 'PLANTXN' + n, imageId: img2 });

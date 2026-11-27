@@ -86,6 +86,7 @@ const tenDigits = x => { let d = digits(x); if (d.length === 12 && d.startsWith(
 const NOTE_MANUAL = 'Manually validated, not system validated';
 const NOTE_PROVIDE = 'Provide statements to validate';
 const NOTE_UNABLE = 'Unable to validate with the statements provided. Provide another statement.';
+function unitsOf(u) { const n = Number(String(u == null ? '' : u).replace(/,/g, '')); return Number.isFinite(n) && n > 0 && n <= 1e7 ? Math.round(n * 1000) / 1000 : 0; }
 function acctLabel(p, accs) {
   if (p.mode === 'cash') return 'Cash';
   const a = (accs || []).find(x => x.id === p.accountId);
@@ -138,7 +139,7 @@ function orderView(o, allPays) {
   else if (claimed > 0) validation = s.manual > 0 ? 'manual' : 'validated';
   return {
     id: o.id, code: o.code, customer: o.customer, total: o.total, status: o.status, note: o.note || '', created: o.created, demo: !!o.demo,
-    customerExtra: o.customerExtra || {}, phone: o.phone || '', createdBy: o.createdBy || '', rejectReason: o.rejectReason || '', modifications: o.modifications || [],
+    customerExtra: o.customerExtra || {}, item: o.item || '', units: o.units || 0, phone: o.phone || '', createdBy: o.createdBy || '', rejectReason: o.rejectReason || '', modifications: o.modifications || [],
     verified: s.verified, awaiting: s.unverified, flagged: s.flagged,
     collected: claimed, validated: s.validated, manual: s.manual, notValidated: s.unverified, validation,
     validationNote: validation === 'unable' ? NOTE_UNABLE : validation === 'pending' ? NOTE_PROVIDE : validation === 'owner' ? 'Cash waiting for owner approval' : validation === 'manual' ? NOTE_MANUAL : '',
@@ -306,7 +307,7 @@ function invoiceHtml(o, v, inv, settings, pays) {
   const extra = settings.customerFields.map(f => `<div>${esc(f.label)}: ${esc((o.customerExtra || {})[f.key] || '')}</div>`).join('');
   return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(inv.no)}</title><style>body{font:15px system-ui,sans-serif;max-width:720px;margin:32px auto;padding:0 20px;color:#111}h1{font-size:22px;margin:0}table{width:100%;border-collapse:collapse;margin:14px 0}td,th{padding:8px;border-bottom:1px solid #ddd;text-align:left}.r{text-align:right}.big{font-size:18px;font-weight:700}@media print{.np{display:none}}</style></head><body>
 <div style="display:flex;justify-content:space-between"><div><h1>${esc(b.name || settings.businessName || 'Invoice')}</h1><div>${esc(b.address)}</div><div>${esc(b.contact)}</div><div>${b.taxNA ? '' : 'GST / Tax no: ' + esc(b.taxId)}</div></div><div style="text-align:right"><div class="big">Invoice ${esc(inv.no)}</div><div>${esc(String(inv.created || '').slice(0, 10))}</div></div></div>
-<hr><div><b>Bill to:</b> ${esc(o.customer)}</div>${extra}<div>Phone: ${esc(o.phone || '')}</div><div>Order: ${esc(o.code)}</div>
+<hr><div><b>Bill to:</b> ${esc(o.customer)}</div>${extra}<div>Phone: ${esc(o.phone || '')}</div><div>Order: ${esc(o.code)}</div>${o.item ? `<div>Product / service: <b>${esc(o.item)}</b>${o.units ? ' &times; ' + esc(String(o.units)) + ' unit' + (o.units === 1 ? '' : 's') : ''}</div>` : ''}
 <table><tr><th>Date</th><th>Mode</th><th class="r">Paid</th></tr>${rows}</table>
 <table><tr><td>Order total</td><td class="r big">${esc(inr(o.total))}</td></tr><tr><td>Paid so far</td><td class="r">${esc(inr(v.collected))}</td></tr><tr><td>Balance</td><td class="r big">${esc(inr(v.outstanding))}</td></tr></table>
 <p class="np"><button onclick="print()">Print or save as PDF</button></p></body></html>`;
@@ -514,7 +515,7 @@ async function route(req, res) {
       const o = (await db.all('orders')).find(x => lc(x.code) === lc(c));
       if (!o) throw new HttpErr(404, 'No order with that ID');
       const n = (await db.all('payments')).filter(p => p.orderCode === o.code && p.status !== 'rejected').length;
-      return send(res, 200, { code: o.code, customer: o.customer, total: o.total, closed: o.status === 'closed', pending: o.status === 'pending', rejected: o.status === 'rejected', nextPayment: n + 1, hasPlan: !!(o.schedule && o.schedule.length), outstanding: orderView(o, await db.all('payments')).outstanding });
+      return send(res, 200, { code: o.code, customer: o.customer, item: o.item || '', units: o.units || 0, total: o.total, closed: o.status === 'closed', pending: o.status === 'pending', rejected: o.status === 'rejected', nextPayment: n + 1, hasPlan: !!(o.schedule && o.schedule.length), outstanding: orderView(o, await db.all('payments')).outstanding });
     }
     if (b === 'by-phone' && c && m === 'GET') {
       await authed(req, url, 'uploader');
@@ -570,7 +571,7 @@ async function route(req, res) {
       if (!due.schedule && !due.nextDue && body.skipDue !== true && r2(total - firstAmt) > 0.005) throw new HttpErr(400, 'Add the payment plan (a screenshot with the dates and amounts) or the next payment due date', { needDue: true });
       let first = null;
       if (body.firstPayment) first = await addPayment(me, { code, status: 'pending' }, { ...body.firstPayment, seq: 1 }, { first: true });
-      const o = await db.insert('orders', { code, customer: String(body.customer).trim().slice(0, 80), total, status: isMgr ? 'open' : 'pending', note: String(body.note || '').slice(0, 200), createdBy: me.name, createdById: me.id, customerExtra, phone: String(body.phone).trim().slice(0, 20), ...due, planImageId: body.planImageId && (await db.get('images', String(body.planImageId))) ? String(body.planImageId) : '' });
+      const o = await db.insert('orders', { code, customer: String(body.customer).trim().slice(0, 80), total, status: isMgr ? 'open' : 'pending', note: String(body.note || '').slice(0, 200), item: String(body.item || '').trim().slice(0, 80), units: unitsOf(body.units), createdBy: me.name, createdById: me.id, customerExtra, phone: String(body.phone).trim().slice(0, 20), ...due, planImageId: body.planImageId && (await db.get('images', String(body.planImageId))) ? String(body.planImageId) : '' });
       await audit(me, 'order_created', 'order', o.code, `${o.customer}, total ${o.total}${o.status === 'pending' ? ', waiting for approval' : ''}`);
       if (o.status === 'open') await afterApprove(me, o, settings);
       else await notify('role:manager', `New order ${o.code} (${o.customer}, ${inr(o.total)}) is waiting for approval.`, o.code);
@@ -591,6 +592,8 @@ async function route(req, res) {
       if (body.customer !== undefined) { if (!String(body.customer).trim()) throw new HttpErr(400, 'Enter the client name'); patch.customer = String(body.customer).trim().slice(0, 80); }
       if (body.total !== undefined) { const t = r2(body.total); if (!(t > 0)) throw new HttpErr(400, 'Enter a valid total'); patch.total = t; }
       patch.customerExtra = readExtra(body.customerExtra, o.customerExtra);
+      if (body.item !== undefined) patch.item = String(body.item).trim().slice(0, 80);
+      if (body.units !== undefined) patch.units = unitsOf(body.units);
       const n = await db.update('orders', o.id, patch);
       await audit(me, 'order_resubmitted', 'order', o.code, '');
       await notify('role:manager', `Order ${o.code} was corrected and sent again for approval.`, o.code);
