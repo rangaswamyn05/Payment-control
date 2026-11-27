@@ -318,6 +318,16 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
     let r1 = await call('PUT', 'settings', { extraSystems: [{ name: 'Accounts', url: 'https://example.com/hook', key: 'k1' }, { name: 'CRM', url: 'https://crm.example.com/hook' }] }, ow); ok('owner saves two extra systems', r1.s === 200, JSON.stringify(r1.j));
     r1 = await call('GET', 'settings', null, ow); const ex = r1.j.settings.connectors.extra; ok('extra systems listed, key never returned', ex.length === 2 && ex[0].keySet === true && !('key' in ex[0]), JSON.stringify(ex));
     r1 = await call('PUT', 'settings', { extraSystems: [] }, ow); }
+  { // backup, then start fresh (last, it empties everything)
+    let r2 = await call('GET', 'data/backup', null, mg); ok('manager cannot take the backup', r2.s === 403);
+    r2 = await call('POST', 'data/start-fresh', { confirm: 'START FRESH' }, ow); ok('start fresh needs a backup first', r2.s === 409 && r2.j.needBackup === true, JSON.stringify(r2.j));
+    r2 = await call('GET', 'data/backup', null, ow); ok('owner backup lists the tables', r2.s === 200 && r2.j.counts.orders > 0 && r2.j.counts.users >= 3 && Array.isArray(r2.j.tables.payments), JSON.stringify(r2.j.counts));
+    ok('backup has no passwords', r2.j.tables.users.every(u => u.pw === undefined || u.pw === '[removed]') && !JSON.stringify(r2.j).includes('demo1234'));
+    r2 = await call('POST', 'data/start-fresh', { confirm: 'yes' }, ow); ok('start fresh needs the typed words', r2.s === 409 && r2.j.needConfirm === true);
+    r2 = await call('POST', 'data/start-fresh', { confirm: 'START FRESH' }, ow); ok('start fresh removes everything', r2.s === 200 && r2.j.removed.orders > 0 && r2.j.removed.users >= 3, JSON.stringify(r2.j));
+    r2 = await call('GET', 'health'); ok('after start fresh: no demo, setup needed', r2.j.needsSetup === true && r2.j.demo === false, JSON.stringify(r2.j));
+    r2 = await call('GET', 'health'); ok('the demo accounts do not come back', r2.j.needsSetup === true && r2.j.demo === false);
+  }
   console.log(bad ? '\n' + bad + ' FAILED' : '\nALL API TESTS PASSED');
   srv.close(); mock.close(); process.exit(bad ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

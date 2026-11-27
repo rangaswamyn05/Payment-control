@@ -131,6 +131,7 @@ fs.mkdirSync('/tmp/pcshots', { recursive: true });
   await pg.click('[data-act=adjust]'); await pg.click('[data-k=change_total]'); await pg.fill('#nt', '40000'); await pg.fill('#ac', 'Discount'); await pg.click('[data-x=ok]'); await pg.waitForSelector('text=Done');
   ok('owner adjusts the total and it applies at once', true);
   await pg.goto(base + '/#/reports'); await pg.waitForSelector('#dl');
+  ok('reports page has the start-fresh card with backup first', /Start fresh for real use/.test(await pg.locator('body').innerText()) && await pg.locator('[data-act=backupAll]').count() === 1 && await pg.locator('#sf_t').count() === 1);
   ok('reports show revenue and a download button', /Revenue/.test(await pg.textContent('main')));
   await pg.screenshot({ path: '/tmp/pcshots/reports.png' });
   await pg.click('[data-act=clearData]'); await pg.waitForSelector('.toast:has-text("Download the report")');

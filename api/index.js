@@ -43,7 +43,7 @@ async function audit(me, action, entity, entityId, detail) {
 // ---------- seed / setup ----------
 async function ensureSeed() {
   const users = await db.all('users');
-  if (users.length || process.env.NO_DEMO === '1') return;
+  if (users.length || process.env.NO_DEMO === '1' || ((await db.get('settings', 'main')) || {}).noDemo) return;
   const mk = (name, username, role) => db.insert('users', { name, username, role, active: true, pw: A.hashPassword('demo1234'), demo: true });
   await mk('Demo Owner', 'owner', 'owner');
   await mk('Demo Manager', 'manager', 'manager');
@@ -878,6 +878,33 @@ async function route(req, res) {
     for (const p of await db.all('payments')) if (closed.has(p.orderCode) && p.imageId) { await db.remove('images', p.imageId); await db.update('payments', p.id, { imageId: '', imageCleared: true }); img++; }
     await audit(me, 'data_cleared', 'data', 'closed', `${inv} invoice files, ${img} screenshots`);
     return send(res, 200, { invoices: inv, screenshots: img });
+  }
+
+  // ----- backup (owner): everything in one file, kept as evidence. Passwords, keys and screenshot files are left out.
+  if (a === 'data' && b === 'backup' && m === 'GET') {
+    const me = await authed(req, url, 'owner');
+    const trim = v => typeof v === 'string' ? (v.length > 20000 ? '[file left out of the backup]' : v) : Array.isArray(v) ? v.map(trim) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, /^(pw|key|secret)$/i.test(k) ? '[removed]' : trim(x)])) : v;
+    const tables = {};
+    for (const t of ['users', 'orders', 'payments', 'audit', 'notifications', 'requests', 'invoices', 'images', 'settings']) tables[t] = (await db.all(t)).map(trim);
+    const counts = Object.fromEntries(Object.entries(tables).map(([k, v]) => [k, v.length]));
+    await db.update('settings', 'main', { lastBackupAt: new Date().toISOString() }).catch(() => {});
+    if (!(await db.get('settings', 'main'))) await db.insert('settings', { id: 'main', lastBackupAt: new Date().toISOString() });
+    await audit(me, 'backup_downloaded', 'data', 'all', Object.entries(counts).map(([k, v]) => `${k} ${v}`).join(', '));
+    return send(res, 200, { app: 'Payment Control', exportedAt: new Date().toISOString(), exportedBy: me.name, counts, tables });
+  }
+
+  // ----- start fresh (owner): removes every order, payment, request, file and login. Settings stay. Needs a backup in the last 30 minutes.
+  if (a === 'data' && b === 'start-fresh' && m === 'POST') {
+    const me = await authed(req, url, 'owner');
+    const body = await readBody(req);
+    const st = (await db.get('settings', 'main')) || {};
+    if (!(st.lastBackupAt && Date.now() - Date.parse(st.lastBackupAt) < 30 * 60 * 1000)) throw new HttpErr(409, 'Download the backup first. Then you can start fresh.', { needBackup: true });
+    if (body.confirm !== 'START FRESH') throw new HttpErr(409, 'Type START FRESH to confirm. This removes every order, payment, request and login, and cannot be undone.', { needConfirm: true });
+    const gone = {};
+    for (const t of ['orders', 'payments', 'audit', 'notifications', 'requests', 'invoices', 'images', 'users']) { let n = 0; for (const r of await db.all(t)) { await db.remove(t, r.id); n++; } gone[t] = n; }
+    await db.update('settings', 'main', { noDemo: true }).catch(() => {});
+    await audit(null, 'started_fresh', 'data', 'all', Object.entries(gone).map(([k, v]) => `${k} ${v}`).join(', ') + '. Done by ' + me.name);
+    return send(res, 200, { removed: gone });
   }
 
   // ----- summary

@@ -405,7 +405,9 @@ async function viewReports() {
   return { active: '#/reports', html: `<div class="head"><div><h1>Reports</h1><div class="muted">${r.orders} order${r.orders === 1 ? '' : 's'} · ${esc(periodName(per))}</div></div><div style="display:flex;gap:8px;flex-wrap:wrap"><select id="rk" class="in" style="width:auto"><option value="month" ${kind === 'month' ? 'selected' : ''}>Month</option><option value="year" ${kind === 'year' ? 'selected' : ''}>Year</option><option value="all" ${kind === 'all' ? 'selected' : ''}>Overall</option></select>${kind === 'month' ? `<input id="rm" type="month" class="in" style="width:auto" value="${esc(per)}">` : ''}${kind === 'year' ? `<select id="ry" class="in" style="width:auto">${yrs.map(y => `<option ${String(y) === per ? 'selected' : ''}>${y}</option>`).join('')}</select>` : ''}<a class="btn p" id="dl" href="/api/reports?period=${encodeURIComponent(per)}&csv=1&t=${encodeURIComponent(S.tok)}" download>Download report</a></div></div>
   <div class="row" style="margin-bottom:16px">${k('Revenue (order totals)', r.revenue)}${k('Collected', r.collected)}${k('Outstanding', r.outstanding)}${k('Validated by statement', r.validated)}${k('Manually validated', r.manual, 'not system validated')}</div>
   <div class="card"><div class="tbl"><div class="tr h" style="min-width:700px"><div class="c1">Order</div><div class="c r">Total</div><div class="c r">Collected</div><div class="c r">Outstanding</div><div class="c r">Validated</div><div class="c r">Manual</div></div>${rows || '<p class="muted">No orders in this period.</p>'}</div></div>
-  <div class="card" style="margin-top:16px"><h2>Clear old files</h2><p class="muted" style="margin:6px 0 12px">Frees storage by removing invoice files and payment screenshots of <b>closed orders</b>. Order records and totals stay, so your revenue history is kept. You must download the report first.</p><button class="btn d" data-act="clearData">Clear invoice files and screenshots</button></div>`,
+  <div class="card" style="margin-top:16px"><h2>Clear old files</h2><p class="muted" style="margin:6px 0 12px">Frees storage by removing invoice files and payment screenshots of <b>closed orders</b>. Order records and totals stay, so your revenue history is kept. You must download the report first.</p><button class="btn d" data-act="clearData">Clear invoice files and screenshots</button></div>
+  <div class="card" id="fresh" style="margin-top:16px"><h2>Start fresh for real use</h2><p class="muted" style="margin:6px 0 12px">Removes every order, payment, request, file and login, including the demo ones. Your settings stay. The next person to open the app creates the real owner account. <b>Step 1:</b> download a backup of everything. Keep it as proof of the testing. <b>Step 2:</b> type START FRESH and confirm.</p>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><button class="btn" data-act="backupAll">1. Download backup</button><input id="sf_t" class="in" style="width:170px" placeholder="Type START FRESH" aria-label="Type START FRESH to confirm" autocomplete="off"><button class="btn d" data-act="startFresh">2. Start fresh</button></div></div>`,
     after() {
       const set = v => { S.rep = v; render(); };
       document.getElementById('rk').addEventListener('change', e => { const v = e.target.value; set(v === 'all' ? 'all' : v === 'year' ? new Date().toISOString().slice(0, 4) : new Date().toISOString().slice(0, 7)); });
@@ -566,6 +568,20 @@ Object.assign(ACT, {
       const x = e.target.closest('[data-x]'); if (!x) return; if (x.dataset.x === 'no') return close();
       try { const r = await api('POST', `orders/${encodeURIComponent(code)}/adjust`, { kind, amount: o.outstanding, newTotal: ov.querySelector('#nt').value.replace(/,/g, ''), comment: ov.querySelector('#ac').value }); close(); toast(r.applied ? 'Done' : 'Sent to the owner'); render(); } catch (er) { ov.querySelector('#aerr2').textContent = er.message; }
     });
+  },
+  async backupAll() {
+    try {
+      const j = await api('GET', 'data/backup');
+      const blob = new Blob([JSON.stringify(j, null, 2)], { type: 'application/json' }), u = URL.createObjectURL(blob), el = document.createElement('a');
+      el.href = u; el.download = 'payment-control-backup-' + new Date().toISOString().slice(0, 10) + '.json'; document.body.appendChild(el); el.click(); el.remove(); setTimeout(() => URL.revokeObjectURL(u), 4000);
+      toast('Backup downloaded: ' + Object.entries(j.counts).filter(([, v]) => v).map(([k, v]) => v + ' ' + k).join(', '));
+    } catch (e) { toast(e.message, true); }
+  },
+  async startFresh() {
+    const t = document.getElementById('sf_t');
+    try { await api('POST', 'data/start-fresh', { confirm: t ? t.value.trim() : '' }); }
+    catch (ex) { toast(ex.message, true); return; }
+    toast('Everything removed. Create the real owner account now.'); logout();
   },
   async clearData() {
     try { await api('POST', 'data/clear', {}); }
