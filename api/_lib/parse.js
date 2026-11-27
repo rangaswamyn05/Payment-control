@@ -59,7 +59,13 @@ function findAmounts(text) {
   if (out.length) return out;
   // the rupee sign is often read as a stray symbol or letter (% ¥ € Z = ?): accept that in front of a lone amount
   for (const l of text.split(/\n/)) {
-    const mm = /^\s*(?:[^\w\s.,]|[zZ])\s*([0-9][0-9,]*(?:\.\d{1,2})?)\s*$/.exec(l);
+    const mm = /^\s*[+\-]?\s*(?:[^\w\s.,]|[zZ])\s*([0-9][0-9,]*(?:\.\d{1,2})?)\s*$/.exec(l);
+    if (mm && mm[1].replace(/[,.]/g, '').length <= 9) { const n = toNum(mm[1]); if (n > 0) out.push(n); }
+  }
+  if (out.length) return out;
+  // the misread sign and the amount sit on a line with other words ("%2,000 Split Expense")
+  for (const l of text.split(/\n/)) {
+    const mm = /(?:^|\s)[%¥€]\s?([0-9][0-9,]*(?:\.\d{1,2})?)(?=\s|$)/.exec(l);
     if (mm && mm[1].replace(/[,.]/g, '').length <= 9) { const n = toNum(mm[1]); if (n > 0) out.push(n); }
   }
   return out;
@@ -136,6 +142,15 @@ function parseUpi(raw) {
 
   const payee = lineAfter(lines, /^(?:paid\s+to|sent\s+to|to)\b/i);
   if (payee) out.payee = payee;
+  // a "Payment Successful" card: the receiver's name sits just above their masked UPI ID, with no "Paid to" label
+  if (!out.payee && /payment\s+successful/i.test(flat)) {
+    const vi = lines.findIndex(l => /@[A-Za-z]{2,}/.test(l));
+    if (vi > 0) {
+      const nm = [];
+      for (let j = vi - 1; j >= 0 && nm.length < 3; j--) { if (/^[A-Za-z][A-Za-z .'&\-]{2,}$/.test(lines[j]) && !STOP.test(lines[j]) && !/successful|payment|november|\bat\b/i.test(lines[j])) nm.unshift(lines[j]); else break; }
+      if (nm.length) { out.payee = nm.join(' '); out.paidCard = true; }
+    }
+  }
 
   // "Sent from NAME with BANK ••26" / "From NAME"
   for (let i = 0; i < lines.length && !out.payer; i++) {
@@ -148,7 +163,7 @@ function parseUpi(raw) {
   }
 
   if (/\bcredited\b|received\s+from|money\s+received/i.test(flat)) out.direction = 'credit';
-  else if (/paid\s+to|sent\s+to|debited/i.test(flat)) out.direction = 'debit';
+  else if (/paid\s+to|sent\s+to|debited/i.test(flat) || out.paidCard) out.direction = 'debit';
 
   if (/\b(success(?:ful)?|completed|paid)\b/i.test(flat)) out.status = 'success';
   else if (/\b(failed|declined|pending)\b/i.test(flat)) out.status = (/\bfailed|declined\b/i.test(flat)) ? 'failed' : 'pending';

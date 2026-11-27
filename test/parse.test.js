@@ -22,6 +22,15 @@ eq('empty text', parseUpi('').amount, null);
 eq('rupee sign missing, number alone on a line', parseUpi('Paid\n2,500\nTransaction ID\nT26112500123456').amount, 2500);
 eq('UTR style', parseUpi('Rs. 1,200.50 paid\nUTR: 612345678901\n03/11/2026 09:15 AM').txnId, '612345678901');
 eq('dd/mm/yyyy', parseUpi('₹100\n03/11/2026 09:15 AM').date, '2026-11-03');
+// Real Kotak "Credited" screenshot (26 Nov 2026), as the OCR engine read it: rupee sign came out as a percent sign after the plus
+r = parseUpi('Credited\n\n+%4,500\n\nStatus SUCCESS ©\nDate 26 Nov 2026\nRemarks UPI/HARSH RAJ/HDFC/\n133371160070/UPI\nTransaction ID 133371160070\nTo\n\n@ Kotak Mahindra Bank\nCurrent XX8960');
+eq('K1 amount (+%4,500)', r.amount, 4500); eq('K1 flagged unsure', !!r.amountUnsure || r.confidence !== 'high', true); eq('K1 txn', r.txnId, '133371160070'); eq('K1 date', r.date, '2026-11-26'); eq('K1 payer', r.payer, 'HARSH RAJ'); eq('K1 direction', r.direction, 'credit');
+// Real PhonePe "Payment Successful" screenshot (26 Nov 2026) as OCR read it
+r = parseUpi('1:09 9 ®¢B@68:- ANE ull ull €\n\nPayment Successful\n26 November 2026 at 11:09 AM\n\nRACHANA SHIVANNA\nGOWDA PATIL\nsveees 3585@kotak\n\n%2,000 split Expense\n\n&) View Details Ce Share Receipt\n\nBuilt for big bites!\n\nROLLS STARTING\n\nDone');
+eq('P1 amount (%2,000 beside words)', r.amount, 2000); eq('P1 date', [r.date, r.time], ['2026-11-26', '11:09']); eq('P1 payee', r.payee, 'RACHANA SHIVANNA GOWDA PATIL'); eq('P1 direction', r.direction, 'debit'); eq('P1 flagged unsure', r.amountUnsure, true);
+// Real GPay screenshot (dark mode) as OCR read it: rupee sign came out as "="
+r = parseUpi('=2,000.00\n\nCompleted\n\nve Payment should now be in RACHANA SHIVANNA\nGOWDA PATIL\'s bank account.\n24 Nov 2026 at 10:03 PM\n\nSent to\nRACHANA SHIVANNA GOWDA PATIL\n24 Nov 2026 at 10:03 PM\n\nSent from\n\nINFANT ALEXIOUS CLEMENT P with ICICI Bank «+26\n\nTransaction ID\n\n111279719729');
+eq('G1 amount', r.amount, 2000); eq('G1 txn', r.txnId, '111279719729'); eq('G1 date', [r.date, r.time], ['2026-11-24', '22:03']); eq('G1 payee', r.payee, 'RACHANA SHIVANNA GOWDA PATIL'); eq('G1 payer', r.payer, 'INFANT ALEXIOUS CLEMENT P'); eq('G1 flagged unsure', r.amountUnsure, true);
 const { parseSchedule } = require('../api/_lib/parse');
 eq('schedule rows with dates and amounts', parseSchedule('Sr Due date Amount\n1 05/12/2026 ₹50,000\n2 20 Jan 2027 ₹50,000\n3 2027-03-01 Rs 25,000.00'), [{ date: '2026-12-05', amount: 50000 }, { date: '2027-01-20', amount: 50000 }, { date: '2027-03-01', amount: 25000 }]);
 eq('schedule read as separate columns', parseSchedule('Date\n05/12/2026\n20/01/2027\nAmount\n50,000\n60,000'), [{ date: '2026-12-05', amount: 50000 }, { date: '2027-01-20', amount: 60000 }]);
