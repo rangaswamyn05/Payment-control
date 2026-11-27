@@ -35,6 +35,7 @@ fs.mkdirSync('/tmp/pcshots', { recursive: true });
   ok('sales menu has no summaries or orders', !/Dashboard|Orders|Review|Statement|Team|Settings|Reports/.test(navText), navText);
   await pg.goto(base + '/#/add'); await pg.waitForSelector('#f_o');
   ok('drop zone is the first thing on the page', await pg.locator('#pz').count() === 1);
+  ok('upload box says to use the app screenshot, not a photo', /not a photo of the screen/.test(await pg.locator('body').innerText()));
   await pg.fill('#f_o', 'demo-1001'); await pg.waitForFunction(() => /order total/.test(document.getElementById('ohint').textContent));
   ok('order lookup shows client, total and the next payment number pre-selected', (await pg.textContent('#ohint')).includes('Demo client A') && (await pg.inputValue('#f_s')) === '1');
   await pg.setInputFiles('#pz input', { name: 'shot.png', mimeType: 'image/png', buffer: PNG });
