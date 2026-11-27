@@ -131,7 +131,7 @@ fs.mkdirSync('/tmp/pcshots', { recursive: true });
   await pg.setInputFiles('#iz input', { name: 'my-invoice.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF') });
   await pg.waitForFunction(() => /my-invoice\.pdf added/.test(document.querySelector('#iz b').textContent), null, { timeout: 8000 });
   ok('a PDF is accepted as the sample invoice', true);
-  await pg.selectOption('#bg', 'GST registered (regular)'); await pg.uncheck('#bn'); await pg.fill('#bt', '27ABCDE1234F1Z5'); await pg.click('#gm_e'); await pg.fill('#bp', '18'); await pg.click('#im_o'); await pg.click('#sf2 button[type=submit]'); await pg.waitForSelector('text=Settings saved');
+  await pg.selectOption('#bg', 'GST registered (regular)'); await pg.uncheck('#bn'); await pg.fill('#bt', '27ABCDE1234F1Z5'); await pg.click('#gm_e'); await pg.click('#gm_e'); ok('including/excluding clears on a second tap', !(await pg.getAttribute('#gm_e', 'class')).includes('on')); await pg.click('#gm_e'); await pg.fill('#bp', '18'); await pg.click('#im_o'); await pg.click('#sf2 button[type=submit]'); await pg.waitForSelector('text=Settings saved');
   ok('a Saved-at note stays next to the Save button', await pg.locator('#savedAt').count() === 1);
   await pg.reload(); await pg.waitForSelector('#bg');
   await pg.reload(); await pg.waitForSelector('#bg'); ok('including/excluding choice and rate are kept', (await pg.getAttribute('#gm_e', 'class')).includes('on') && await pg.inputValue('#bp') === '18');
