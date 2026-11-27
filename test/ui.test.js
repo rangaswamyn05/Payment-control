@@ -20,7 +20,8 @@ fs.mkdirSync('/tmp/pcshots', { recursive: true });
   const browser = await chromium.launch();
   const errors = [];
   async function newPage(w, h) { const ctx = await browser.newContext({ viewport: { width: w, height: h } }); const pg = await ctx.newPage(); pg.on('pageerror', e => errors.push(String(e))); pg.on('console', m => { if (m.type() === 'error' && !/favicon|fonts|401 \(Unauthorized\)|status of 409/i.test(m.text())) errors.push(m.text()); }); return pg; }
-  async function login(pg, u) { await pg.goto(base + '/#/login'); await pg.waitForSelector('#un'); await pg.fill('#un', u); await pg.fill('#pw', 'demo1234'); await pg.click('button[type=submit]'); await pg.waitForSelector('.top'); }
+  let lastPrompt = '';
+  async function login(pg, u) { await pg.goto(base + '/#/login'); await pg.waitForSelector('#un'); await pg.fill('#un', u); await pg.fill('#pw', 'demo1234'); await pg.click('button[type=submit]'); await pg.waitForSelector('.top'); if (u === 'owner') { await pg.waitForSelector('.modal', { timeout: 5000 }).catch(() => {}); if (await pg.locator('.modal').count()) { lastPrompt = await pg.locator('.modal').innerText(); await pg.click('.modal [data-x=no]'); await pg.waitForSelector('.modal', { state: 'detached' }); } } }
   const overflow = pg => pg.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 2);
 
   // ---- sales on a phone
@@ -115,6 +116,7 @@ fs.mkdirSync('/tmp/pcshots', { recursive: true });
 
   // ---- owner
   pg = await newPage(1280, 900); await login(pg, 'owner');
+  ok('new owner is greeted with the set-up checklist: business details, bank accounts, team', /Set up your business/.test(lastPrompt) && /Business details/.test(lastPrompt) && /Bank accounts/.test(lastPrompt) && /Your team/.test(lastPrompt) && /Not now/.test(lastPrompt), lastPrompt);
   await pg.goto(base + '/#/team'); await pg.waitForSelector('#uf');
   await pg.fill('#un1', 'Asha'); await pg.fill('#uu', 'asha'); await pg.fill('#up', 'password123'); await pg.selectOption('#ur', 'uploader'); await pg.click('#uf button[type=submit]');
   await pg.waitForSelector('text=asha');
