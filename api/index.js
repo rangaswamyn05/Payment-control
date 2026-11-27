@@ -407,7 +407,7 @@ async function route(req, res) {
       const inApi = (body.connectors && body.connectors.api) || {};
       if (inApi.url) { const bad = validateUrl(inApi.url); if (bad) throw new HttpErr(400, bad); }
       const bz = body.business || cur.business;
-      const biz = { name: String(bz.name || '').slice(0, 80), taxNA: !!bz.taxNA, taxId: String(bz.taxId || '').trim().slice(0, 30), address: String(bz.address || '').slice(0, 200), contact: String(bz.contact || '').slice(0, 120), gstRate: String(bz.gstRate || '').slice(0, 20), kind: String(bz.kind || '').slice(0, 40), industry: String(bz.industry || '').slice(0, 40) };
+      const biz = { name: String(bz.name || '').slice(0, 80), taxNA: !!bz.taxNA, taxId: String(bz.taxId || '').trim().slice(0, 30), address: String(bz.address || '').slice(0, 200), contact: String(bz.contact || '').slice(0, 120), gstRate: String(bz.gstRate || '').slice(0, 40), kind: String(bz.kind || '').slice(0, 40), industry: String(bz.industry || '').slice(0, 40) };
       if (body.onboarded && !biz.taxNA && !biz.taxId) throw new HttpErr(400, 'Enter your GST or tax number, or tick that GST or tax is not applicable to your business');
       const cf = (Array.isArray(body.customerFields) ? body.customerFields : cur.customerFields).slice(0, 6).map(f => ({ label: String(f.label || '').trim().slice(0, 30) })).filter(f => f.label).map((f, i) => ({ label: f.label, key: 'f' + i + '_' + f.label.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 12) }));
       const lm = body.limits || cur.limits;

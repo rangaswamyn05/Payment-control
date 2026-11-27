@@ -83,7 +83,7 @@ function confirmBox({ title, text, ok = 'Confirm', danger }) {
 }
 const imgUrl = id => `/api/images/${encodeURIComponent(id)}?t=${encodeURIComponent(S.tok)}`;
 
-function logout() { S.tok = ''; S.user = null; S.setupChecked = false; localStorage.removeItem('pc_tok'); S.add = null; location.hash = '#/login'; render(); }
+function logout() { S.tok = ''; S.user = null; S.savedAt = ''; S.setupChecked = false; try { sessionStorage.removeItem('pc_setup_seen'); } catch (e) { /* ignore */ } localStorage.removeItem('pc_tok'); S.add = null; location.hash = '#/login'; render(); }
 const go = h => { location.hash = h; };
 function backBtn(fallback) { return `<button class="back" data-act="back" data-fallback="${fallback || '#/'}">${ICON.back}Back</button>`; }
 
@@ -371,6 +371,7 @@ async function render() {
 async function setupPrompt() {
   if (S.setupChecked || !S.user || S.user.role !== 'owner') return;
   S.setupChecked = true;
+  try { if (sessionStorage.getItem('pc_setup_seen') === '1') return; } catch (e) { /* storage blocked: show it */ }
   try {
     const st = (await api('GET', 'settings')).settings, us = (await api('GET', 'users')).users;
     const b = st.business || {};
@@ -380,6 +381,7 @@ async function setupPrompt() {
       { done: us.some(u => u.role !== 'owner' && u.active !== false), t: 'Your team', d: 'Add the uploaders and managers who will use the app', go: '#/team' }
     ];
     if (steps.every(x => x.done)) return;
+    try { sessionStorage.setItem('pc_setup_seen', '1'); } catch (e) { /* ignore */ }
     const nx = steps.findIndex(x => !x.done);
     const { ov, close } = modal(`<h2>Set up your business</h2><p class="muted">Three quick steps before your team starts. You can come back to any of them later.</p>
       <div style="display:flex;flex-direction:column;gap:10px;margin:14px 0">${steps.map((x, i) => `<a href="${x.go}" data-x="go" style="display:flex;gap:12px;align-items:flex-start;text-decoration:none;color:inherit;padding:10px 12px;border:1px solid var(--line,#e3e6ea);border-radius:10px"><span aria-hidden="true" style="font-weight:700;color:${x.done ? 'var(--acc)' : 'var(--mut,#667)'}">${x.done ? '✓' : (i + 1)}</span><span><b>${esc(x.t)}</b>${x.done ? ' <span class="muted">(done)</span>' : ''}<div class="muted" style="font-size:13px">${esc(x.d)}</div></span></a>`).join('')}</div>

@@ -318,6 +318,9 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
     let r1 = await call('PUT', 'settings', { extraSystems: [{ name: 'Accounts', url: 'https://example.com/hook', key: 'k1' }, { name: 'CRM', url: 'https://crm.example.com/hook' }] }, ow); ok('owner saves two extra systems', r1.s === 200, JSON.stringify(r1.j));
     r1 = await call('GET', 'settings', null, ow); const ex = r1.j.settings.connectors.extra; ok('extra systems listed, key never returned', ex.length === 2 && ex[0].keySet === true && !('key' in ex[0]), JSON.stringify(ex));
     r1 = await call('PUT', 'settings', { extraSystems: [] }, ow); }
+  { // the GST choice is kept in full
+    let g = await call('PUT', 'settings', { business: { name: 'Acme', address: 'x', taxId: '1', gstRate: 'GST registered (regular)', kind: 'Private limited company', industry: 'Photography and events' } }, ow); ok('GST choice saves', g.s === 200);
+    g = await call('GET', 'settings', null, ow); ok('GST, business type and industry come back whole', g.j.settings.business.gstRate === 'GST registered (regular)' && g.j.settings.business.kind === 'Private limited company' && g.j.settings.business.industry === 'Photography and events', JSON.stringify(g.j.settings.business)); }
   { // sample invoice as a PDF
     const PDF = 'data:application/pdf;base64,JVBERi0xLjQKMSAwIG9iajw8Pj5lbmRvYmoKdHJhaWxlcjw8Pj4KJSVFT0Y=', NOTPDF = 'data:application/pdf;base64,aGVsbG8gbm90IGEgcGRmIGF0IGFsbA==';
     let r3 = await call('POST', 'images', { dataUrl: PDF, kind: 'sample' }, ow); ok('owner can upload a PDF as the sample invoice', r3.s === 200 && !!r3.j.id, JSON.stringify(r3.j));
