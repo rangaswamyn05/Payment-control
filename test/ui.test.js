@@ -126,7 +126,7 @@ fs.mkdirSync('/tmp/pcshots', { recursive: true });
   ok('owner approves the cash', true);
   await pg.goto(base + '/#/settings'); await pg.waitForSelector('#sf2');
   ok('settings: storage dropdown, GST number rule, limits', !!(await pg.$('#st')) && !!(await pg.$('#bn')) && !!(await pg.$('#l1')));
-  if (!(await pg.$('[data-acc]'))) await pg.click('#addacc'); await pg.fill('[data-acc] [data-f=name]', 'HDFC Current'); await pg.fill('[data-acc] [data-f=last4]', '4321'); await pg.fill('#bz', 'Acme Photos'); await pg.fill('#ba', '12 MG Road, Pune'); await pg.check('#bn'); await pg.click('#inv_y'); await pg.click('#im_p'); await pg.selectOption('#bg', 'GST composition scheme'); await pg.selectOption('#st', 'app_sheet'); await pg.fill('#l1', '50000');
+  if (!(await pg.$('[data-acc]'))) await pg.click('#addacc'); await pg.fill('[data-acc] [data-f=name]', 'HDFC Current'); await pg.fill('[data-acc] [data-f=bank]', 'HDFC Bank'); await pg.fill('[data-acc] [data-f=last4]', '4321'); await pg.fill('#bz', 'Acme Photos'); await pg.fill('#ba', '12 MG Road, Pune'); await pg.check('#bn'); await pg.click('#inv_y'); await pg.click('#im_p'); await pg.selectOption('#bg', 'GST composition scheme'); await pg.selectOption('#st', 'app_sheet'); await pg.fill('#l1', '50000');
   await pg.click('#sf2 button[type=submit]'); await pg.waitForSelector('text=Settings saved');
   await pg.setInputFiles('#iz input', { name: 'my-invoice.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF') });
   await pg.waitForFunction(() => /my-invoice\.pdf added/.test(document.querySelector('#iz b').textContent), null, { timeout: 8000 });
