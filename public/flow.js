@@ -28,21 +28,18 @@ window.addEventListener('hashchange', () => { DROP.cur = null; });
 // ---------- the payment capture block (used by New order and Add payment) ----------
 function newPay() {
   const t = new Date(), p = n => String(n).padStart(2, '0');
-  return { mode: 'upi', imageId: '', preview: '', amount: '', date: '', today: `${t.getFullYear()}-${p(t.getMonth() + 1)}-${p(t.getDate())}`, time: '', txnId: '', payer: '', payee: '', ocr: '', ocrMsg: '', busy: false, gstMode: '', gstRate: '' };
+  return { mode: 'upi', imageId: '', preview: '', amount: '', date: '', today: `${t.getFullYear()}-${p(t.getMonth() + 1)}-${p(t.getDate())}`, time: '', txnId: '', payer: '', payee: '', ocr: '', ocrMsg: '', busy: false };
 }
 function payFields(P) {
   const cash = P.mode === 'cash';
   return `<div class="seg" role="group" aria-label="Payment mode" style="margin-bottom:14px">${['upi', 'transfer', 'cheque', 'cash', 'card'].map(m => `<button type="button" class="${P.mode === m ? 'on' : ''}" data-pmode="${m}">${m === 'upi' ? 'UPI' : m === 'transfer' ? 'Bank transfer' : m === 'cheque' ? 'Cheque' : m === 'card' ? 'Card / Razorpay' : 'Cash'}</button>`).join('')}</div>
   ${cash ? '<div class="note warn" style="margin-bottom:14px">Cash is approved by the owner before it counts as confirmed.</div>' : `${P.preview ? `<div class="card" style="padding:12px;display:flex;gap:12px;align-items:center;margin-bottom:14px"><img class="thumb" alt="Your screenshot" src="${P.preview}"><div style="flex:1"><b>${P.busy ? 'Reading the screenshot…' : 'Screenshot added'}</b><div class="muted" style="font-size:13px">${esc(P.ocrMsg || '')}</div></div><button type="button" class="btn s" data-pclear>Replace</button></div>${P.rawText ? `<details class="muted" style="font-size:12px;margin:-6px 0 12px"><summary>What the reader saw</summary><pre style="white-space:pre-wrap;margin:6px 0 0">${esc(P.rawText)}</pre></details>` : ''}` : dropZone('pz', 'Drop the payment screenshot here')}<div class="muted" style="font-size:13px;margin-top:6px">Upload the screenshot from your payment app, not a photo of the screen.</div>`}
   ${cash || (P.preview && !P.busy) ? `<div class="two field"><div><label for="p_a">Amount (₹)</label><input id="p_a" class="in" data-p="amount" inputmode="decimal" value="${esc(P.amount)}"></div>${cash ? '' : `<div><label for="p_r">${P.mode === 'cheque' ? 'Cheque number' : P.mode === 'card' ? 'Payment ID' : 'Transaction ID'} <span class="opt">(required)</span></label><input id="p_r" class="in" data-p="txnId" value="${esc(P.txnId)}" autocomplete="off" style="${String(P.txnId).trim() ? '' : 'border:2px solid #C62828;background:#FFF5F5'}"></div>`}</div>
-  <div class="field"><label for="p_d">Payment date ${P.date ? '<span class="opt">(read from the screenshot)</span>' : '<span class="opt">(today, change it if the payment was earlier)</span>'}</label><input id="p_d" type="date" class="in" data-p="date" value="${esc(P.date || P.today)}" max="${esc(P.today)}"></div>
-  <div class="field" role="group" aria-label="GST on this amount"><label>Is this amount with GST or without GST?</label><div class="seg" style="margin-top:6px"><button type="button" class="${P.gstMode === 'incl' ? 'on' : ''}" data-gstm="incl">Including GST</button><button type="button" class="${P.gstMode === 'excl' ? 'on' : ''}" data-gstm="excl">Excluding GST</button></div><div class="muted" style="font-size:13px;margin-top:6px">${P.gstMode === 'excl' ? 'GST will be added on top of this amount on the invoice.' : P.gstMode === 'incl' ? 'GST is already inside this amount. The invoice will split it out.' : ''}</div></div>
-  ${P.gstMode ? `<div class="field"><label for="p_g">GST rate (%) <span class="opt">(type 0 if no GST applies)</span></label><input id="p_g" class="in" data-p="gstRate" inputmode="decimal" value="${esc(P.gstRate)}" style="max-width:140px"></div>` : ''}` : ''}`;
+  <div class="field"><label for="p_d">Payment date ${P.date ? '<span class="opt">(read from the screenshot)</span>' : '<span class="opt">(today, change it if the payment was earlier)</span>'}</label><input id="p_d" type="date" class="in" data-p="date" value="${esc(P.date || P.today)}" max="${esc(P.today)}"></div>` : ''}`;
 }
 function wirePay(P, redraw) {
   document.querySelectorAll('[data-p]').forEach(el => el.addEventListener('input', () => { P[el.dataset.p] = el.value; if (el.dataset.p === 'amount') P.amtOk = true; if (el.dataset.p === 'date') P.time = ''; if (el.dataset.p === 'txnId') { el.style.border = el.value.trim() ? '' : '2px solid #C62828'; el.style.background = el.value.trim() ? '' : '#FFF5F5'; } }));
   document.querySelectorAll('[data-amt]').forEach(b => b.addEventListener('click', () => { P.amount = b.dataset.amt; P.amtOk = true; redraw(); }));
-  document.querySelectorAll('[data-gstm]').forEach(b => b.addEventListener('click', () => { P.gstMode = b.dataset.gstm; redraw(); }));
   document.querySelectorAll('[data-pmode]').forEach(b => b.addEventListener('click', () => { P.mode = b.dataset.pmode; redraw(); }));
   const c = document.querySelector('[data-pclear]'); if (c) c.addEventListener('click', () => { P.imageId = ''; P.preview = ''; P.ocrMsg = ''; P.amtAlts = []; P.amtOk = false; redraw(); });
   const onFile = f => readShot(P, f, redraw);
@@ -110,14 +107,12 @@ async function readShot(P, file, redraw) {
 }
 function payCheck(P) {
   if (!(Number(String(P.amount).replace(/,/g, '')) > 0)) return 'Enter the amount.';
-  if (P.gstMode !== 'incl' && P.gstMode !== 'excl') return 'Choose whether the amount is including GST or excluding GST.';
-  { const g = String(P.gstRate).trim(); if (g === '' || !(Number(g) >= 0 && Number(g) <= 100)) return 'Enter the GST rate in % (0 if no GST applies).'; }
   if (P.amtAlts && P.amtAlts.length && !P.amtOk) return 'Confirm the amount first: tap the right one above.';
     if (P.mode !== 'cash' && !P.imageId) return 'Add the payment screenshot.';
   if (P.mode !== 'cash' && !String(P.txnId).trim()) return (P.mode === 'cheque' ? 'No cheque number. Type it from the photo, or use a photo that shows it.' : P.mode === 'card' ? 'No payment ID. Type it from the receipt, or use a screenshot that shows it.' : 'No transaction ID. Type it from the screenshot, or use a screenshot that shows it.');
   return '';
 }
-const payBody = P => ({ mode: P.mode, amount: String(P.amount).replace(/,/g, ''), date: (P.date || P.today) + (P.date && P.time ? 'T' + P.time : ''), txnId: P.txnId, payer: P.payer, payee: P.payee, imageId: P.imageId, ocr: P.ocr, gstMode: P.gstMode, gstRate: String(P.gstRate).trim() });
+const payBody = P => ({ mode: P.mode, amount: String(P.amount).replace(/,/g, ''), date: (P.date || P.today) + (P.date && P.time ? 'T' + P.time : ''), txnId: P.txnId, payer: P.payer, payee: P.payee, imageId: P.imageId, ocr: P.ocr });
 
 // ---------- Add payment (sales) ----------
 function viewAdd() {
@@ -449,6 +444,7 @@ async function viewSettings() {
   <div class="field" id="invq" style="${b.taxNA ? '' : 'display:none'}"><label>Do you still want to create invoices?</label><div class="seg" style="margin-top:6px"><button type="button" id="inv_y" class="${b.noInvoice ? '' : 'on'}">Yes, create invoices</button><button type="button" id="inv_n" class="${b.noInvoice ? 'on' : ''}">No invoices</button></div></div>
   <div class="field"><label for="ba">Business address <span class="opt">(required, printed on invoices)</span></label><input id="ba" class="in" value="${esc(b.address)}"></div><div class="field"><label for="bc">Phone and email on the invoice</label><input id="bc" class="in" value="${esc(b.contact)}"></div>
   <div class="field"><label>Sample invoice <span class="opt">(optional)</span></label>${dropZone('iz', s.invoiceSampleId ? 'Sample added. Drop a new one to replace it' : 'Drop a sample invoice here (PDF or picture)', 1, 'image/*,application/pdf')}<div class="muted" style="font-size:13px;margin-top:4px">Invoices follow this style. If it shows details we do not collect, we will ask you.</div></div>
+  <div id="gstq" style="${b.gstRate === 'GST registered (regular)' ? '' : 'display:none'}"><div class="field"><label>In your sample invoice, are amounts including GST or excluding GST?</label><div class="seg" style="margin-top:6px"><button type="button" id="gm_i" class="${b.gstMode === 'incl' ? 'on' : ''}">Including GST</button><button type="button" id="gm_e" class="${b.gstMode === 'excl' ? 'on' : ''}">Excluding GST (add GST on top)</button></div></div><div class="field"><label for="bp">GST rate (%)</label><input id="bp" class="in" inputmode="decimal" value="${esc(b.gstPct)}" style="max-width:140px"></div></div>
   <h2 style="margin:20px 0 6px">Business bank accounts</h2><div class="muted" style="font-size:13px;margin-bottom:10px">Add every account customers pay into. Only the last 4 digits are kept. A bank statement is accepted only if it shows one of these accounts, so a personal statement can never validate payments.</div>
   <div id="accs">${(s.accounts || []).map((x, i) => accRow(x, i)).join('')}</div><button class="btn" type="button" id="addacc" style="margin-bottom:6px">+ Add a bank account</button>
   <h2 style="margin:20px 0 10px">Order IDs</h2>
@@ -481,7 +477,9 @@ async function viewSettings() {
       document.getElementById('addacc').addEventListener('click', () => { accs.insertAdjacentHTML('beforeend', accRow({})); });
       accs.addEventListener('click', e => { const b = e.target.closest('[data-rmacc]'); if (b) b.closest('[data-acc]').remove(); });
       const readAccs = () => [...accs.querySelectorAll('[data-acc]')].map(r => { const g = f => r.querySelector(`[data-f=${f}]`).value.trim(); return { id: g('id'), name: g('name'), bank: g('bank'), last4: g('last4'), upi: g('upi').split(/[,\s]+/).filter(Boolean) }; }).filter(a => a.name || a.last4);
-      const bn = document.getElementById('bn'); bn.addEventListener('change', () => { document.getElementById('bt').disabled = bn.checked; document.getElementById('invq').style.display = bn.checked ? '' : 'none'; });
+      const bn = document.getElementById('bn');
+      const gq = () => { document.getElementById('gstq').style.display = document.getElementById('bg').value === 'GST registered (regular)' ? '' : 'none'; }; document.getElementById('bg').addEventListener('change', gq);
+      const gmode = m => { document.getElementById('gm_i').classList.toggle('on', m === 'incl'); document.getElementById('gm_e').classList.toggle('on', m === 'excl'); }; document.getElementById('gm_i').addEventListener('click', () => gmode('incl')); document.getElementById('gm_e').addEventListener('click', () => gmode('excl')); bn.addEventListener('change', () => { document.getElementById('bt').disabled = bn.checked; document.getElementById('invq').style.display = bn.checked ? '' : 'none'; });
       const yn = on => { document.getElementById('inv_y').classList.toggle('on', !on); document.getElementById('inv_n').classList.toggle('on', on); }; document.getElementById('inv_y').addEventListener('click', () => yn(false)); document.getElementById('inv_n').addEventListener('click', () => yn(true));
       let sampleId = s.invoiceSampleId || '';
       wireDrop('iz', async f => {
@@ -502,9 +500,14 @@ async function viewSettings() {
         const v = id => document.getElementById(id).value;
         try {
           if (!v('ba').trim()) throw new Error('Enter your business address. It goes on every invoice');
+          const reg = v('bg') === 'GST registered (regular)', gmv = document.getElementById('gm_e').classList.contains('on') ? 'excl' : document.getElementById('gm_i').classList.contains('on') ? 'incl' : '';
+          if (!v('bz').trim()) throw new Error('Enter your business name');
+          if (!v('bg')) throw new Error('Choose your GST status');
+          if (reg && !gmv) throw new Error('Choose whether the amount you collect is including GST or excluding GST');
+          if (reg && !(v('bp').trim() !== '' && Number(v('bp')) >= 0 && Number(v('bp')) <= 100)) throw new Error('Enter your GST rate in %');
           if (!bn.checked && !v('bt').trim()) throw new Error('Enter your GST or tax number, or tick that it is not applicable');
           await api('PUT', 'settings', { ...(document.getElementById('shl') ? { sheetLink: document.getElementById('se').checked ? document.getElementById('shl').value : '', sheetCols: { payments: [...document.querySelectorAll('[data-colp]')].filter(x => x.checked).map(x => x.dataset.colp), orders: [...document.querySelectorAll('[data-colo]')].filter(x => x.checked).map(x => x.dataset.colo) } } : {}), accounts: readAccs(), extraSystems: readSys(), businessName: v('bz'), onboarded: true, storage: v('st'), orderIdMode: v('om'), invoiceSampleId: sampleId,
-            business: { name: v('bz'), kind: v('bk'), industry: v('bi'), gstRate: v('bg'), taxId: v('bt'), taxNA: bn.checked, noInvoice: bn.checked && document.getElementById('inv_n').classList.contains('on'), address: v('ba'), contact: v('bc') },
+            business: { name: v('bz'), kind: v('bk'), industry: v('bi'), gstRate: v('bg'), gstMode: reg ? gmv : '', gstPct: reg ? v('bp').trim() : '', taxId: v('bt'), taxNA: bn.checked, noInvoice: bn.checked && document.getElementById('inv_n').classList.contains('on'), address: v('ba'), contact: v('bc') },
             limits: { singlePayment: v('l1').replace(/,/g, ''), collectionThreshold: v('l2').replace(/,/g, '') },
             connectors: { api: { fields: [...document.querySelectorAll('[data-apif]')].filter(x => x.checked).map(x => x.dataset.apif), enabled: document.getElementById('ae').checked, url: v('au'), key: v('ak') } } });
           S.savedAt = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); toast('Settings saved'); render();

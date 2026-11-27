@@ -376,7 +376,7 @@ async function setupPrompt() {
     const st = (await api('GET', 'settings')).settings, us = (await api('GET', 'users')).users;
     const b = st.business || {};
     const steps = [
-      { done: !!((b.name || st.businessName) && b.address && (b.taxId || b.taxNA)), t: 'Business details', d: 'Name, address and GST or tax number (they print on invoices)', go: '#/settings' },
+      { done: !!((b.name || st.businessName) && b.address && b.gstRate && (b.taxId || b.taxNA) && (b.gstRate !== 'GST registered (regular)' || (b.gstMode && b.gstPct !== ''))), t: 'Business details', d: 'Name, address and GST or tax number (they print on invoices)', go: '#/settings' },
       { done: (st.accounts || []).length > 0, t: 'Bank accounts', d: 'Where your payments arrive, so bank statements can be matched', go: '#/settings' },
       { done: us.some(u => u.role !== 'owner' && u.active !== false), t: 'Your team', d: 'Add the uploaders and managers who will use the app', go: '#/team' }
     ];

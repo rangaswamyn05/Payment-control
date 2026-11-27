@@ -183,7 +183,7 @@ async function getSettings() {
     connectors: { api: { enabled: false, url: '', key: '', ...((s.connectors && s.connectors.api) || {}), fields: pickCols(s.connectors && s.connectors.api && s.connectors.api.fields, API_FIELDS, API_DEFAULT) }, extra: (s.connectors && Array.isArray(s.connectors.extra) ? s.connectors.extra : []).slice(0, 5) },
     storage: STORAGE.includes(s.storage) ? s.storage : 'app',
     orderIdMode: s.orderIdMode === 'auto' ? 'auto' : 'own',
-    business: { name: '', taxId: '', taxNA: false, noInvoice: false, address: '', contact: '', gstRate: '', kind: '', industry: '', ...(s.business || {}) },
+    business: { name: '', taxId: '', taxNA: false, noInvoice: false, address: '', contact: '', gstRate: '', gstMode: '', gstPct: '', kind: '', industry: '', ...(s.business || {}) },
     customerFields: Array.isArray(s.customerFields) ? s.customerFields : [],
     limits: { singlePayment: 0, collectionThreshold: 0, ...(s.limits || {}) },
     sheet: { id: String((s.sheet && s.sheet.id) || '').slice(0, 80), cols: { payments: pickCols(s.sheet && s.sheet.cols && s.sheet.cols.payments, PAY_COLS, PAY_DEFAULT), orders: pickCols(s.sheet && s.sheet.cols && s.sheet.cols.orders, ORD_COLS, ORD_DEFAULT) } },
@@ -251,7 +251,7 @@ async function addPayment(me, order, body, opts = {}) {
   if (th > 0 && already + amount > th) notices.push('Please talk to your manager or owner first. This entry is saved and flagged for them.');
   const p = await db.insert('payments', {
     orderCode: order.code, mode, amount, date, txnId, seq, seqReason, payer: String(body.payer || '').trim().slice(0, 80), payee: String(body.payee || '').trim().slice(0, 80),
-    gstMode: body.gstMode === 'incl' || body.gstMode === 'excl' ? body.gstMode : '', gstRate: body.gstMode && Number(body.gstRate) >= 0 && Number(body.gstRate) <= 100 ? Number(body.gstRate) : 0, imageId: body.imageId || '', note: String(body.note || '').slice(0, 200), status, reason, approval,
+    imageId: body.imageId || '', note: String(body.note || '').slice(0, 200), status, reason, approval,
     createdBy: me.id, createdByName: me.name, ocr: body.ocr ? String(body.ocr).slice(0, 20) : '',
     attention: notices.length > 0 && !notices[0].startsWith('This payment is above') ? true : !!(lim > 0 && amount > lim),
   });
@@ -304,9 +304,9 @@ async function applyAdjust(me, o, r, settings) {
 function esc(x) { return String(x == null ? '' : x).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 function invoiceHtml(o, v, inv, settings, pays) {
   const b = settings.business;
-  const split = p => { const r = Number(p.gstRate) || 0; if (p.gstMode === 'incl') { const g = r2(p.amount * r / (100 + r)); return { net: r2(p.amount - g), gst: g, tot: p.amount }; } if (p.gstMode === 'excl') { const g = r2(p.amount * r / 100); return { net: p.amount, gst: g, tot: r2(p.amount + g) }; } return { net: p.amount, gst: 0, tot: p.amount }; };
+  const gm = b.gstRate === 'GST registered (regular)' ? b.gstMode : '', gr = Number(b.gstPct) || 0, split = p => { const r = gr; if (gm === 'incl') { const g = r2(p.amount * r / (100 + r)); return { net: r2(p.amount - g), gst: g, tot: p.amount }; } if (gm === 'excl') { const g = r2(p.amount * r / 100); return { net: p.amount, gst: g, tot: r2(p.amount + g) }; } return { net: p.amount, gst: 0, tot: p.amount }; };
   const live = pays.filter(p => p.status !== 'rejected'), sp = live.map(split);
-  const rows = live.map((p, i) => `<tr><td>${esc(String(p.date || '').slice(0, 10))}</td><td>${esc(p.mode)}</td><td class="r">${esc(inr(sp[i].net))}</td><td class="r">${p.gstMode ? esc(inr(sp[i].gst)) + ' <span style="color:#667">(' + esc(String(p.gstRate || 0)) + '%)</span>' : '-'}</td><td class="r">${esc(inr(sp[i].tot))}</td></tr>`).join('');
+  const rows = live.map((p, i) => `<tr><td>${esc(String(p.date || '').slice(0, 10))}</td><td>${esc(p.mode)}</td><td class="r">${esc(inr(sp[i].net))}</td><td class="r">${gm ? esc(inr(sp[i].gst)) + ' <span style="color:#667">(' + esc(String(gr)) + '%)</span>' : '-'}</td><td class="r">${esc(inr(sp[i].tot))}</td></tr>`).join('');
   const tn = r2(sp.reduce((a, x) => a + x.net, 0)), tg = r2(sp.reduce((a, x) => a + x.gst, 0)), tt = r2(sp.reduce((a, x) => a + x.tot, 0));
   const extra = settings.customerFields.map(f => `<div>${esc(f.label)}: ${esc((o.customerExtra || {})[f.key] || '')}</div>`).join('');
   return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(inv.no)}</title><style>body{font:15px system-ui,sans-serif;max-width:720px;margin:32px auto;padding:0 20px;color:#111}h1{font-size:22px;margin:0}table{width:100%;border-collapse:collapse;margin:14px 0}td,th{padding:8px;border-bottom:1px solid #ddd;text-align:left}.r{text-align:right}.big{font-size:18px;font-weight:700}@media print{.np{display:none}}</style></head><body>
@@ -410,7 +410,7 @@ async function route(req, res) {
       const inApi = (body.connectors && body.connectors.api) || {};
       if (inApi.url) { const bad = validateUrl(inApi.url); if (bad) throw new HttpErr(400, bad); }
       const bz = body.business || cur.business;
-      const biz = { name: String(bz.name || '').slice(0, 80), taxNA: !!bz.taxNA, noInvoice: !!bz.taxNA && !!bz.noInvoice, taxId: String(bz.taxId || '').trim().slice(0, 30), address: String(bz.address || '').slice(0, 200), contact: String(bz.contact || '').slice(0, 120), gstRate: String(bz.gstRate || '').slice(0, 40), kind: String(bz.kind || '').slice(0, 40), industry: String(bz.industry || '').slice(0, 40) };
+      const biz = { name: String(bz.name || '').slice(0, 80), taxNA: !!bz.taxNA, noInvoice: !!bz.taxNA && !!bz.noInvoice, taxId: String(bz.taxId || '').trim().slice(0, 30), address: String(bz.address || '').slice(0, 200), contact: String(bz.contact || '').slice(0, 120), gstRate: String(bz.gstRate || '').slice(0, 40), gstMode: bz.gstMode === 'incl' || bz.gstMode === 'excl' ? bz.gstMode : '', gstPct: bz.gstPct !== undefined && bz.gstPct !== '' && Number(bz.gstPct) >= 0 && Number(bz.gstPct) <= 100 ? String(Number(bz.gstPct)) : '', kind: String(bz.kind || '').slice(0, 40), industry: String(bz.industry || '').slice(0, 40) };
       if (body.onboarded && !biz.taxNA && !biz.taxId) throw new HttpErr(400, 'Enter your GST or tax number, or tick that GST or tax is not applicable to your business');
       const cf = (Array.isArray(body.customerFields) ? body.customerFields : cur.customerFields).slice(0, 6).map(f => ({ label: String(f.label || '').trim().slice(0, 30) })).filter(f => f.label).map((f, i) => ({ label: f.label, key: 'f' + i + '_' + f.label.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 12) }));
       const lm = body.limits || cur.limits;
