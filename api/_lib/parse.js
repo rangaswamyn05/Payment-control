@@ -91,7 +91,7 @@ function lineAfter(lines, re) {
 }
 
 function cleanSender(l) {
-  return l.replace(/\s+with\s+.*$/i, '').replace(/[•·.*x]{2,}\s*\d*\s*$/i, '').replace(/\s+\d{2,}$/, '').trim();
+  return l.replace(/\s*\([^)]*\)\s*$/, '').replace(/\s+with\s+.*$/i, '').replace(/[•·.*x]{2,}\s*\d*\s*$/i, '').replace(/\s+\d{2,}$/, '').trim();
 }
 
 function parseUpi(raw) {
@@ -134,7 +134,7 @@ function parseUpi(raw) {
   }
 
   // Bank remark line: UPI/NAME/BANK/123456789012/...
-  const rem = /UPI\s*\/\s*([^\/]+?)\s*\/\s*([A-Za-z]{3,8})\s*\/\s*(\d{8,})/i.exec(flat);
+  const rem = /UPI\s*\/\s*([^\/]+?)\s*\/\s*([A-Za-z]{3,8})\s*\/\s*(\d{8,})/i.exec(flat.replace(/\bRemarks?\b\s*:?/gi, ' '));
   if (rem) { out.payer = rem[1].trim(); if (!out.txnId) out.txnId = rem[3]; }
 
   const vpa = /([A-Za-z0-9._\-]{3,}@[A-Za-z]{2,})/.exec(flat);
@@ -158,7 +158,7 @@ function parseUpi(raw) {
       const rest = lines[i].replace(/^(?:sent\s+from|paid\s+by|from)\b[\s:\-]*/i, '').trim();
       const cand = rest || lines[i + 1] || '';
       const c = cleanSender(cand);
-      if (c && /^[A-Za-z][A-Za-z .'&\-]{2,}$/.test(c)) out.payer = c;
+      if (c && /^[A-Za-z][A-Za-z .'&\-]{2,}$/.test(c) && !STOP.test(c) && !/transaction|\bid\b/i.test(c)) out.payer = c;
     }
   }
 

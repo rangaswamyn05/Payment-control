@@ -31,6 +31,14 @@ eq('P1 amount (%2,000 beside words)', r.amount, 2000); eq('P1 date', [r.date, r.
 // Real GPay screenshot (dark mode) as OCR read it: rupee sign came out as "="
 r = parseUpi('=2,000.00\n\nCompleted\n\nve Payment should now be in RACHANA SHIVANNA\nGOWDA PATIL\'s bank account.\n24 Nov 2026 at 10:03 PM\n\nSent to\nRACHANA SHIVANNA GOWDA PATIL\n24 Nov 2026 at 10:03 PM\n\nSent from\n\nINFANT ALEXIOUS CLEMENT P with ICICI Bank «+26\n\nTransaction ID\n\n111279719729');
 eq('G1 amount', r.amount, 2000); eq('G1 txn', r.txnId, '111279719729'); eq('G1 date', [r.date, r.time], ['2026-11-24', '22:03']); eq('G1 payee', r.payee, 'RACHANA SHIVANNA GOWDA PATIL'); eq('G1 payer', r.payer, 'INFANT ALEXIOUS CLEMENT P'); eq('G1 flagged unsure', r.amountUnsure, true);
+// Real Kotak credited screens where OCR put the word "Remarks" inside the remark text
+r = parseUpi('Credited\n+%4,000\nStatus SUCCESS ©\nDate 25 Nov 2026\nUPI/MANISHA PANDA/\nRemarks NESF/632933077307/\nPayment from\nTransaction ID 632933077307\nTo\n() Kotak Mahindra Bank\nCurrent XX8960');
+eq('K2 payer across lines', r.payer, 'MANISHA PANDA'); eq('K2 txn', r.txnId, '632933077307'); eq('K2 amount', r.amount, 4000);
+r = parseUpi('Credited\n+%4,000\nStatus SUCCESS ©\nDate 24 Nov 2026\nUPI/BHARATHI C/ICIC/\nRemarks 468434730966/Payment\nfrom\nTransaction ID 468434730966\nTo\n() Kotak Mahindra Bank\nCurrent XX8960');
+eq('K3 payer is not "Transaction ID"', r.payer, 'BHARATHI C'); eq('K3 date', r.date, '2026-11-24');
+// Real GPay dark "details" screen: the payer line carries the bank in brackets
+r = parseUpi('To rachana patil\n$91 sores «3585,\n%2,000\nphotoshoot adv\n@ Completed\n23 Nov 2026, 8:01pm\nUPI transaction ID\n632739967036\nTo: RACHANA S PATIL\nla~1@okhdfcbank on Google Pay\nFrom: DINESHWARAN C (ICICI Bank)\n+++sluva@okicici on Google Pay\nGoogle transaction ID\nCICAgPibjNXbUA');
+eq('G2 amount', r.amount, 2000); eq('G2 txn is the UPI id', r.txnId, '632739967036'); eq('G2 date', [r.date, r.time], ['2026-11-23', '20:01']); eq('G2 payer', r.payer, 'DINESHWARAN C');
 const { parseSchedule } = require('../api/_lib/parse');
 eq('schedule rows with dates and amounts', parseSchedule('Sr Due date Amount\n1 05/12/2026 ₹50,000\n2 20 Jan 2027 ₹50,000\n3 2027-03-01 Rs 25,000.00'), [{ date: '2026-12-05', amount: 50000 }, { date: '2027-01-20', amount: 50000 }, { date: '2027-03-01', amount: 25000 }]);
 eq('schedule read as separate columns', parseSchedule('Date\n05/12/2026\n20/01/2027\nAmount\n50,000\n60,000'), [{ date: '2026-12-05', amount: 50000 }, { date: '2027-01-20', amount: 60000 }]);
