@@ -321,6 +321,12 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
   { // the GST choice is kept in full
     let g = await call('PUT', 'settings', { business: { name: 'Acme', address: 'x', taxId: '1', gstRate: 'GST registered (regular)', kind: 'Private limited company', industry: 'Photography and events' } }, ow); ok('GST choice saves', g.s === 200);
     g = await call('GET', 'settings', null, ow); ok('GST, business type and industry come back whole', g.j.settings.business.gstRate === 'GST registered (regular)' && g.j.settings.business.kind === 'Private limited company' && g.j.settings.business.industry === 'Photography and events', JSON.stringify(g.j.settings.business)); }
+  { // GST mode and rate stored; invoice splits GST
+    const pr = await call('GET', 'orders', null, ow); ok('orders list loads', pr.s === 200);
+    let g = await call('PUT', 'settings', { business: { name: 'Acme', address: 'x', taxNA: true, noInvoice: true } }, ow);
+    g = await call('GET', 'settings', null, ow); ok('"no invoices" choice is kept when tax is not applicable', g.j.settings.business.noInvoice === true);
+    await call('PUT', 'settings', { business: { name: 'Acme', address: 'x', taxId: '1', taxNA: false, noInvoice: true } }, ow);
+    g = await call('GET', 'settings', null, ow); ok('"no invoices" is dropped when GST applies', g.j.settings.business.noInvoice === false); }
   { // sample invoice as a PDF
     const PDF = 'data:application/pdf;base64,JVBERi0xLjQKMSAwIG9iajw8Pj5lbmRvYmoKdHJhaWxlcjw8Pj4KJSVFT0Y=', NOTPDF = 'data:application/pdf;base64,aGVsbG8gbm90IGEgcGRmIGF0IGFsbA==';
     let r3 = await call('POST', 'images', { dataUrl: PDF, kind: 'sample' }, ow); ok('owner can upload a PDF as the sample invoice', r3.s === 200 && !!r3.j.id, JSON.stringify(r3.j));
