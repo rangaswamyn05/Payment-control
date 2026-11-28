@@ -297,7 +297,11 @@ async function viewBuilder() {
 
 // Who can do what. Shown on the Team page and on first-time setup.
 function rolesCard(compact) {
-  const r = (t, who, items) => `<div style="border-top:1px solid #EEF2F6;padding:12px 0"><b>${t}</b> <span class="muted" style="font-size:13px">${who}</span><ul style="margin:6px 0 0 18px;padding:0;font-size:14px;line-height:1.5">${items.map(x => `<li>${x}</li>`).join('')}</ul></div>`;
+  const r = (t, line) => `<div style="border-top:1px solid #EEF2F6;padding:10px 0"><b>${t}</b><div style="font-size:14px;margin-top:2px">${line}</div></div>`;
+  return `<div class="card" style="margin:0 0 16px;text-align:left"><h2 style="margin-bottom:4px">Who can do what</h2><div class="muted" style="font-size:13px">Three roles. Every payment is checked by the system or a second person, never only by the one who added it.</div>
+  ${r('Uploader', 'Adds payments.')}
+  ${r('Manager', 'Sees balances and confirms cash.')}
+  ${r('Owner', 'Manages people and settings.')}</div>`;
   return `<div class="card" style="margin:0 0 16px;text-align:left"><h2 style="margin-bottom:4px">Who can do what</h2><div class="muted" style="font-size:13px">Three roles. Every payment is checked by the system or a second person, never only by the one who added it.</div>
   ${r('Uploader', 'sales team', ['Creates orders and adds payments by dropping a screenshot.', 'Sees only their own orders and what is collected and outstanding.', 'Later payments need no approval. They are validated against the bank statement.'])}
   ${r('Manager', 'finance or operations', ['Approves new orders (can correct the client name or total).', 'Verifies payments the system could not match, and reviews flagged ones.', 'Approves a payment plan that does not match the order. Cash, offline entries, large amounts and anything a manager enters go to the owner.'])}
