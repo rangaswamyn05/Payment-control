@@ -35,8 +35,10 @@ async function readBody(req) {
   try { return JSON.parse(s); } catch (e) { throw new HttpErr(400, 'Bad request'); }
 }
 
-const isBuilder = u => u.role === 'owner' && (u.orgId || 'main') === 'main'; // the person who built the app: sees every business's feedback and usage
-const pubUser = u => ({ id: u.id, name: u.name, username: u.username, role: u.role, active: u.active !== false, ...(isBuilder(u) ? { builder: true } : {}) });
+// The builder is ONE person: the first owner account of the original business. A second owner added later is not the builder.
+const isBuilder = async u => { if (u.role !== 'owner' || (u.orgId || 'main') !== 'main') return false; const o = (await db.allGlobal('users')).filter(x => x.role === 'owner' && (x.orgId || 'main') === 'main').sort((p, q) => String(p.created).localeCompare(String(q.created)) || String(p.id).localeCompare(String(q.id)))[0]; return !!o && o.id === u.id; };
+const pubUser = u => ({ id: u.id, name: u.name, username: u.username, role: u.role, active: u.active !== false });
+const pubUserB = async u => ({ ...pubUser(u), ...((await isBuilder(u)) ? { builder: true } : {}) });
 
 async function audit(me, action, entity, entityId, detail) {
   try { await db.insert('audit', { at: new Date().toISOString(), by: me ? me.name + ' (' + me.role + ')' : 'system', byId: me ? me.id : null, action, entity, entityId, detail: String(detail || '').slice(0, 400) }); } catch (e) { /* never block the action */ }
@@ -382,10 +384,10 @@ async function route(req, res) {
     if (!u || !A.verifyPassword(body.password, u.pw)) { fails.get(key).push(Date.now()); throw new HttpErr(401, 'Wrong username or password'); }
     db.setOrg(u.orgId);
     await audit(u, 'login', 'user', u.id, '');
-    return send(res, 200, { token: A.sign({ uid: u.id }), user: pubUser(u) });
+    return send(res, 200, { token: A.sign({ uid: u.id }), user: await pubUserB(u) });
   }
 
-  if (a === 'me' && m === 'GET') { const me = await authed(req, url, 'uploader'); return send(res, 200, { user: pubUser(me) }); }
+  if (a === 'me' && m === 'GET') { const me = await authed(req, url, 'uploader'); return send(res, 200, { user: await pubUserB(me) }); }
 
   // ----- users (owner)
   if (a === 'users') {
@@ -1074,7 +1076,7 @@ async function route(req, res) {
   // ----- builder view: every business's feedback and usage in one place (only the person who built the app)
   if (a === 'builder' && m === 'GET') {
     const me = await authed(req, url, 'owner');
-    if (!isBuilder(me)) throw new HttpErr(403, 'Only the builder can see this');
+    if (!(await isBuilder(me))) throw new HttpErr(403, 'Only the builder can see this');
     const [users, orders, pays, reqs, sets] = await Promise.all(['users', 'orders', 'payments', 'requests', 'settings'].map(t => db.allGlobal(t)));
     const orgOf = r => r.orgId || 'main';
     const nameOf = {}; for (const st of sets) { const o = st.id === 'main' ? 'main' : String(st.id).replace(/^main_/, ''); nameOf[o] = (st.business && st.business.name) || st.businessName || ''; }

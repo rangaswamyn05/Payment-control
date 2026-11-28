@@ -358,6 +358,9 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
     ok('thumbs are counted', bv.j.ups >= 1 && bv.j.downs >= 1);
     ok('a new business owner cannot open the builder view', (await call('GET', 'builder', null, global.__ta)).s === 403);
     ok('the original manager/uploader cannot either', (await call('GET', 'builder', null, up)).s === 403);
+    { const o2 = await call('POST', 'users', { name: 'Partner', username: 'partner.owner', password: 'partnerpass1', role: 'owner' }, ow); ok('a second owner can be added to the original business', o2.s === 200, JSON.stringify(o2.j));
+      const l2 = await call('POST', 'login', { username: 'partner.owner', password: 'partnerpass1' }); ok('a second owner of the original business is not the builder', l2.s === 200 && !l2.j.user.builder && (await call('GET', 'builder', null, l2.j.token)).s === 403, JSON.stringify(l2.j));
+      ok('the original owner is the builder', (await call('GET', 'me', null, ow)).j.user.builder === true); }
     ok('metrics block is present', bv.j.metrics && typeof bv.j.metrics.screenshots === 'number' && Array.isArray(bv.j.metrics.fieldEdits)); }
   { // invoice per payment
     await call('PUT', 'settings', { business: { name: 'Acme', address: 'x', taxId: '1', gstRate: 'GST registered (regular)', gstMode: 'excl', gstPct: '18', invoiceMode: 'payment' } }, ow);
