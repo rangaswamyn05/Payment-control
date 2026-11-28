@@ -363,6 +363,19 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
       const l2 = await call('POST', 'login', { username: 'partner.owner', password: 'partnerpass1' }); ok('a second owner of the original business is not the builder', l2.s === 200 && !l2.j.user.builder && (await call('GET', 'builder', null, l2.j.token)).s === 403, JSON.stringify(l2.j));
       ok('the original owner is the builder', (await call('GET', 'me', null, ow)).j.user.builder === true); }
     ok('metrics block is present', bv.j.metrics && typeof bv.j.metrics.screenshots === 'number' && Array.isArray(bv.j.metrics.fieldEdits)); }
+  { // demo business for reviewers
+    const dl = await call('POST', 'login', { username: 'demo.owner', password: 'demo1234' }); ok('reviewers can sign in to the demo business', dl.s === 200 && dl.j.user.role === 'owner' && !dl.j.user.builder, JSON.stringify(dl.j));
+    const dt = dl.j.token;
+    const dp = await call('GET', 'payments', null, dt); const plist = dp.j.payments || dp.j || [];
+    ok('the demo business has the 12 sample screenshot payments, none of them cash', plist.length === 12 && plist.every(x => x.mode === 'upi' && x.imageId), String(plist.length));
+    const csv = require('fs').readFileSync(require('path').join(__dirname, '..', 'public', 'demo', 'demo_statement.csv'), 'utf8').split(/\r?\n/);
+    const hi = csv.findIndex(l => /^Date,/.test(l)); const rows = csv.slice(hi + 1).filter(Boolean).map(l => { const c = l.split(','); const [d, m2, y] = c[0].split('/'); return { date: y + '-' + m2 + '-' + d, desc: c[1], ref: c[2], amount: Number(c[4] || 0) }; }).filter(r => r.amount > 0);
+    let st = await call('POST', 'statement', { rows, accountId: 'acc_demo', headText: csv.slice(0, hi + 1).join('\n') }, dt);
+    ok('the sample statement is accepted for the demo account and validates the payments', st.s === 200 && st.j.matched.length === 10, JSON.stringify(st.j).slice(0, 300));
+    const dp2 = await call('GET', 'payments', null, dt); const l2 = dp2.j.payments || dp2.j || [];
+    ok('one sample payment is left as unable to validate, one flagged as overpaid', l2.filter(x => x.status === 'client_reported' && x.stmtUnableAt).length === 1 && l2.filter(x => x.status === 'flagged').length === 1, JSON.stringify(l2.map(x => x.status)));
+    const main = await call('GET', 'orders', null, ow); ok('the demo orders never show in the real business', (main.j.orders || main.j || []).every(x => !/^DEMO-[A-D]$/.test(x.code)));
+    const bvd = await call('GET', 'builder', null, ow); ok('the demo business does not count in the builder numbers', !bvd.j.businesses.some(b => b.name === 'Demo Photo Studio')); }
   { // invoice per payment
     await call('PUT', 'settings', { business: { name: 'Acme', address: 'x', taxId: '1', gstRate: 'GST registered (regular)', gstMode: 'excl', gstPct: '18', invoiceMode: 'payment' } }, ow);
     const ol = await call('GET', 'orders', null, ow); const oc = (ol.j.orders || ol.j || []).find ? (ol.j.orders || ol.j).find(x => x.code) : null;

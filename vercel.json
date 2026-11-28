@@ -1,6 +1,16 @@
 {
   "framework": null,
   "outputDirectory": "public",
-  "functions": { "api/index.js": { "maxDuration": 30 } },
-  "rewrites": [{ "source": "/api/:path*", "destination": "/api/index?p=:path*" }]
+  "functions": {
+    "api/index.js": {
+      "maxDuration": 30,
+      "includeFiles": "api/_lib/demo/**"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "/api/index?p=:path*"
+    }
+  ]
 }

@@ -58,6 +58,43 @@ async function ensureSeed() {
   await o('DEMO-1003', 'Demo client C', 45000);
 }
 
+// ---------- a ready-made demo business for reviewers ----------
+// Sample data only: amounts, dates and transaction IDs come from 12 real payment-app screenshots; the client names are made up.
+// Everything is created once, on the first demo sign-in, inside its own private business.
+const DEMO_ORG = 'org_demo';
+const DEMO_ORDERS = [
+  { code: 'DEMO-A', customer: 'Demo client A (wedding shoot)', total: 20000, phone: '9000000001', pays: [
+    ['2026-11-19', 5000, '319528516136', 'acbceb49'], ['2026-11-22', 2000, '319731456048', 'd09c8201'], ['2026-11-24', 4000, '468434730966', '0f6c53ce']] },
+  { code: 'DEMO-B', customer: 'Demo client B (corporate event)', total: 15000, phone: '9000000002', pays: [
+    ['2026-11-20T19:45', 2000, 'T2611201945059984134495', 'a0b66d1e'], ['2026-11-21T09:33', 2000, 'T2611210932581721202362', '890571ed'], ['2026-11-22T09:12', 1000, '632645158678', '28e4ea26'], ['2026-11-23T17:35', 5000, '111267979197', '25d9e307']] },
+  { code: 'DEMO-C', customer: 'Demo client C (product shoot)', total: 12000, phone: '9000000003', pays: [
+    ['2026-11-22', 9000, '618686080368', 'c198e431'], ['2026-11-23T20:01', 2000, '632739967036', '1166ac8c']] },
+  { code: 'DEMO-D', customer: 'Demo client D (family portraits)', total: 10000, phone: '9000000004', pays: [
+    ['2026-11-24T22:03', 2000, '111279719729', '751d51ca'], ['2026-11-25', 4000, '632933077307', '3fac7928'], ['2026-11-26', 4500, '133371160070', '81ff5425']] },
+];
+async function ensureDemoOrg() {
+  if ((await db.allGlobal('users')).some(u => u.username === 'demo.owner')) return;
+  db.setOrg(DEMO_ORG);
+  const fs = require('fs'), path = require('path');
+  await db.insert('settings', { id: 'main', businessName: 'Demo Photo Studio', noDemo: true, demoOrg: true, onboarded: true,
+    business: { name: 'Demo Photo Studio', address: '12 Demo Road, Bengaluru', taxNA: true, gstRate: 'Not registered', noInvoice: true, invoiceAns: 'no', kind: 'Service', industry: 'Photography' },
+    accounts: [{ id: 'acc_demo', name: 'Demo Photo Studio', bank: 'Demo Bank', last4: '4321', upi: [] }] });
+  const mk = (name, username, role) => db.insert('users', { name, username, role, active: true, pw: A.hashPassword('demo1234'), demo: true });
+  await mk('Demo Owner', 'demo.owner', 'owner'); await mk('Demo Manager', 'demo.manager', 'manager');
+  const up = await mk('Demo Uploader', 'demo.uploader', 'uploader');
+  for (const o of DEMO_ORDERS) {
+    await db.insert('orders', { code: o.code, customer: o.customer, total: o.total, status: 'open', note: 'Sample order', phone: o.phone, createdBy: up.name, createdById: up.id, demo: true, created: o.pays[0][0].slice(0, 10) + 'T09:00:00.000Z' });
+    let seq = 0, paid = 0;
+    for (const [when, amount, txnId, file] of o.pays) {
+      seq++; paid += amount;
+      let imageId = '';
+      try { const b64 = fs.readFileSync(path.join(__dirname, '_lib', 'demo', file + '.jpg')).toString('base64'); imageId = (await db.insert('images', { dataUrl: 'data:image/jpeg;base64,' + b64, createdBy: up.id })).id; } catch (e) { /* the sample works without the picture */ }
+      const over = paid > o.total + 0.005;
+      await db.insert('payments', { orderCode: o.code, mode: 'upi', amount, date: when, txnId, seq, seqReason: '', payer: o.customer.split(' (')[0], payee: 'Demo Photo Studio', imageId, note: '', status: over ? 'flagged' : 'client_reported', reason: over ? 'overpayment' : '', approval: '', createdBy: up.id, createdByName: up.name, ocr: 'high', attention: over, demo: true, created: when.slice(0, 10) + 'T10:00:00.000Z' });
+    }
+  }
+}
+
 async function authed(req, url, min) {
   let tok = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
   if (!tok && url) tok = url.searchParams.get('t') || '';
@@ -343,7 +380,7 @@ async function route(req, res) {
     let users;
     try { await ensureSeed(); users = await db.all('users'); }
     catch (e) { return send(res, 503, { ok: false, error: 'Database problem: ' + String(e.message || e).replace(/eyJ[\w.-]+/g, '[key]').slice(0, 200) }); }
-    return send(res, 200, { ok: true, db: db.kind, ocr: !!process.env.GOOGLE_VISION_KEY, needsSetup: users.length === 0, demo: users.some(u => u.demo), secretSet: A.secretIsSet });
+    return send(res, 200, { ok: true, db: db.kind, ocr: !!process.env.GOOGLE_VISION_KEY, needsSetup: users.length === 0, demo: users.some(u => u.demo && !u.orgId), secretSet: A.secretIsSet });
   }
 
   if (a === 'setup' && m === 'POST') {
@@ -378,6 +415,7 @@ async function route(req, res) {
     await ensureSeed();
     const body = await readBody(req);
     const uname = lc(body.username);
+    if (uname === 'demo.owner' || uname === 'demo.manager' || uname === 'demo.uploader') await ensureDemoOrg();
     const key = uname + '|' + (req.headers['x-forwarded-for'] || '');
     if (tooMany(key)) throw new HttpErr(429, 'Too many attempts. Try again in a few minutes.');
     const u = (await db.all('users')).find(x => x.username === uname && x.active !== false);
@@ -1077,8 +1115,11 @@ async function route(req, res) {
   if (a === 'builder' && m === 'GET') {
     const me = await authed(req, url, 'owner');
     if (!(await isBuilder(me))) throw new HttpErr(403, 'Only the builder can see this');
-    const [users, orders, pays, reqs, sets] = await Promise.all(['users', 'orders', 'payments', 'requests', 'settings'].map(t => db.allGlobal(t)));
+    const [users0, orders0, pays0, reqs0, sets0] = await Promise.all(['users', 'orders', 'payments', 'requests', 'settings'].map(t => db.allGlobal(t)));
     const orgOf = r => r.orgId || 'main';
+    const demoOrgs = new Set(sets0.filter(st => st.demoOrg).map(st => String(st.id).replace(/^main_/, '')));
+    const skipDemo = rows => rows.filter(r => !demoOrgs.has(orgOf(r)));
+    const users = skipDemo(users0), orders = skipDemo(orders0), pays = skipDemo(pays0), reqs = skipDemo(reqs0), sets = sets0.filter(st => !st.demoOrg);
     const nameOf = {}; for (const st of sets) { const o = st.id === 'main' ? 'main' : String(st.id).replace(/^main_/, ''); nameOf[o] = (st.business && st.business.name) || st.businessName || ''; }
     const orgs = [...new Set([...users.map(orgOf), ...sets.map(st => st.id === 'main' ? 'main' : String(st.id).replace(/^main_/, ''))])];
     const median = a => { const x = a.filter(n => n > 0).sort((p, q) => p - q); return x.length ? x[Math.floor(x.length / 2)] : 0; };
