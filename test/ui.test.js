@@ -116,7 +116,7 @@ fs.mkdirSync('/tmp/pcshots', { recursive: true });
 
   // ---- owner
   pg = await newPage(1280, 900); await login(pg, 'owner');
-  ok('new owner is greeted with the set-up checklist: business details, bank accounts, team', /Set up your business/.test(lastPrompt) && /Business details/.test(lastPrompt) && /Bank accounts/.test(lastPrompt) && /Your team/.test(lastPrompt) && /Not now/.test(lastPrompt), lastPrompt);
+  ok('new owner is greeted with the set-up checklist: business details, bank accounts, team', /Set up your business/.test(lastPrompt) && /Business details/.test(lastPrompt) && /Bank accounts/.test(lastPrompt) && /Add your team/.test(lastPrompt) && /Not now/.test(lastPrompt), lastPrompt);
   await pg.goto(base + '/#/team'); await pg.waitForSelector('#uf');
   await pg.fill('#un1', 'Asha'); await pg.fill('#uu', 'asha'); await pg.fill('#up', 'password123'); await pg.selectOption('#ur', 'uploader'); await pg.click('#uf button[type=submit]');
   await pg.waitForSelector('text=asha');
