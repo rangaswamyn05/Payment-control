@@ -50,6 +50,7 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
   r = await call('POST', 'payments', { ...base1, txnId: '' }, up); ok('screenshot with no transaction ID is rejected', r.s === 400 && r.j.needTxn === true);
   r = await call('POST', 'payments', { ...base1, ocr: 'high', readMs: 4200, edited: ['amount', 'bogus'], amtConfirm: true }, up); ok('uploader adds payment 1 (next number picked)', r.s === 200 && r.j.payment.seq === 1 && !r.j.payment.needsOwner);
   { const bv0 = await call('GET', 'builder', null, ow); ok('reader metrics are recorded from real payments', bv0.j.metrics.timed >= 1 && bv0.j.metrics.medianReadSec === 4.2 && bv0.j.metrics.fieldEdits.find(f => f.field === 'amount').n >= 1 && !bv0.j.metrics.fieldEdits.some(f => f.field === 'bogus') && bv0.j.metrics.amountConfirmPct > 0, JSON.stringify(bv0.j.metrics)); }
+  { const mn = await call('GET', 'payments/mine', null, up); ok('uploader sees the validation status of their own payments', mn.s === 200 && mn.j.payments.length > 0 && mn.j.payments.every(x => x.status) && mn.j.payments.some(x => /bank statement|Waiting/.test(x.validationNote)), JSON.stringify(mn.j).slice(0, 300)); }
   ok('payment event sent to business API with idempotency key', got.length === 2 && got[1].b.order_id === 'DEMO-1001' && got[1].b.amount === 30000 && /:created$/.test(got[1].h['x-idempotency-key']));
   r = await call('POST', 'payments', base1, up); ok('same transaction id refused as duplicate', r.s === 409 && r.j.duplicate === true);
   r = await call('POST', 'payments', { ...base1, mode: 'cheque', txnId: '' }, up); ok('cheque without a cheque number is rejected', r.s === 400 && r.j.needTxn === true);
@@ -67,7 +68,7 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
   r = await call('POST', 'payments', { ...p2, txnId: 'X3', date: '2999-01-01' }, up); ok('future date refused', r.s === 400);
   r = await call('POST', 'payments', { ...p2, txnId: 'X4', amount: -5 }, up); ok('negative amount refused', r.s === 400);
   r = await call('POST', 'payments', { ...p2, txnId: 'X5', orderCode: 'NOPE' }, up); ok('unknown order refused', r.s === 400);
-  r = await call('GET', 'payments/mine', null, up); ok('uploader sees own submissions only, no status or totals', r.s === 200 && r.j.payments.length === 2 && r.j.payments[0].status === undefined);
+  r = await call('GET', 'payments/mine', null, up); ok('uploader sees own submissions only, with the validation status but no totals', r.s === 200 && r.j.payments.length === 2 && !!r.j.payments[0].status && r.j.total === undefined && r.j.outstanding === undefined);
 
   // dashboard states
   r = await call('GET', 'orders/DEMO-1001', null, mg); ok('order shows collected, outstanding, validation pending', r.j.order.collected === 35000 && r.j.order.outstanding === 65000 && r.j.order.validation === 'pending' && /Upload a statement/.test(r.j.order.validationNote), JSON.stringify(r.j.order));

@@ -757,7 +757,7 @@ async function route(req, res) {
     if (b === 'mine' && m === 'GET') {
       const me = await authed(req, url, 'uploader');
       const mineP = (await db.all('payments')).filter(p => p.createdBy === me.id).reverse();
-      return send(res, 200, { payments: mineP.map(p => ({ id: p.id, orderCode: p.orderCode, amount: p.amount, mode: p.mode, date: p.date, created: p.created, seq: p.seq })) });
+      return send(res, 200, { payments: mineP.map(p => ({ id: p.id, orderCode: p.orderCode, amount: p.amount, mode: p.mode, date: p.date, created: p.created, seq: p.seq, status: p.status, reason: p.reason || '', validationNote: RANK[me.role] >= RANK.manager ? payNote(p) : payNote(p).replace(NOTE_PROVIDE, 'Waiting for the bank statement check').replace(/^Unable to validate: .*$/, 'Could not be matched on the bank statement yet. A manager will review it.') })) });
     }
     if (!b && m === 'POST') {
       const me = await authed(req, url, 'uploader');
