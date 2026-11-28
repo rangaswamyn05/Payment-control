@@ -174,6 +174,20 @@ fs.mkdirSync('/tmp/pcshots', { recursive: true });
   ok('"It\'s a new order" skips the existing ones', await pg.locator('[data-existing]').count() === 0);
   await pg.close();
 
+  // ---- a new business signs up from the sign-in page
+  pg = await newPage(390, 844);
+  await pg.goto(base + '/#/login'); await pg.waitForSelector('#swm');
+  ok('sign-in page offers "New business? Create your account"', (await pg.textContent('#swm')).includes('New business'));
+  await pg.click('#swm'); await pg.waitForSelector('#bz');
+  await pg.fill('#bz', 'Sunrise Studio'); await pg.fill('#nm', 'Meera'); await pg.fill('#un', 'meera.owner'); await pg.fill('#pw', 'meerapass1'); await pg.click('button[type=submit]');
+  await pg.waitForSelector('.top');
+  ok('new business owner is signed in', (await pg.textContent('.me')).includes('Meera'));
+  await pg.goto(base + '/#/settings'); await pg.waitForSelector('#bz');
+  ok('their business name is already filled in', await pg.inputValue('#bz') === 'Sunrise Studio');
+  await pg.goto(base + '/#/orders'); await pg.waitForTimeout(600);
+  ok('they see none of the other business’s orders', !(await pg.textContent('body')).includes('UI-1'));
+  await pg.close();
+
   ok('no browser errors', errors.length === 0, errors.join(' | '));
   await browser.close(); srv.close();
   console.log(bad ? '\n' + bad + ' FAILED' : '\nALL UI TESTS PASSED'); process.exit(bad ? 1 : 0);

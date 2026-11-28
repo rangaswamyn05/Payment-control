@@ -103,24 +103,28 @@ function shell(active, inner) {
 // ---------- views ----------
 function viewLogin() {
   const demo = S.health && S.health.demo;
-  const setup = S.health && S.health.needsSetup;
+  const first = S.health && S.health.needsSetup, su = !!S.signup && !first, setup = first || su;
   return { html: `<div class="login"><div class="logo" style="width:48px;height:48px;border-radius:12px">${ICON.shield.replace('width="18" height="18"', 'width="28" height="28"')}</div><h1 style="margin-top:14px">Payment Control</h1><p class="muted" style="margin:4px 0 20px">Know that every payment reached the business.</p>
-  ${setup ? rolesCard() : ''}<form class="card" id="lf" autocomplete="on">${setup ? '<h2 style="margin-bottom:12px">Create the owner account</h2><div class="field"><label for="nm">Your name</label><input id="nm" class="in" autocomplete="name"></div>' : ''}
+  ${setup ? rolesCard() : ''}<form class="card" id="lf" autocomplete="on">${setup ? '<h2 style="margin-bottom:12px">' + (su ? 'Create your business account' : 'Create the owner account') + '</h2>' + (su ? '<div class="field"><label for="bz">Business name</label><input id="bz" class="in" autocomplete="organization"></div>' : '') + '<div class="field"><label for="nm">Your name</label><input id="nm" class="in" autocomplete="name"></div>' : ''}
   <div class="field"><label for="un">Username</label><input id="un" class="in" autocomplete="username" autocapitalize="none" spellcheck="false"></div>
   <div class="field"><label for="pw">Password${setup ? ' <span class="opt">(at least 8 characters)</span>' : ''}</label><input id="pw" type="password" class="in" autocomplete="${setup ? 'new-password' : 'current-password'}"></div>
   <div class="err" id="lerr" style="min-height:18px;margin-bottom:6px"></div><button class="btn p" style="width:100%" type="submit">${setup ? 'Create account' : 'Sign in'}</button></form>
+  ${first ? '' : `<p style="text-align:center;margin-top:14px;font-size:14px"><a href="#/login" id="swm" style="text-decoration:underline">${su ? 'Already have an account? Sign in' : 'New business? Create your account'}</a></p>`}
   ${demo ? '<div class="note" style="margin-top:16px"><b>Demo logins</b><div style="margin-top:4px">Usernames: owner, manager, uploader. Password: demo1234</div></div>' : ''}
   <p class="muted" style="font-size:13px;margin-top:16px">Uploaders add payments. Managers see balances and confirm cash. Owners manage people and settings.</p></div>`,
     after() {
       const f = document.getElementById('lf');
+      const sw = document.getElementById('swm'); if (sw) sw.addEventListener('click', e => { e.preventDefault(); S.signup = !S.signup; render(); });
       f.addEventListener('submit', async e => {
         e.preventDefault();
         const err = document.getElementById('lerr'); err.textContent = '';
         try {
-          const r = setup
+          const r = su
+            ? await api('POST', 'signup', { business: document.getElementById('bz').value, name: document.getElementById('nm').value, username: document.getElementById('un').value, password: document.getElementById('pw').value })
+            : setup
             ? await api('POST', 'setup', { name: document.getElementById('nm').value, username: document.getElementById('un').value, password: document.getElementById('pw').value })
             : await api('POST', 'login', { username: document.getElementById('un').value, password: document.getElementById('pw').value });
-          S.tok = r.token; S.user = r.user; localStorage.setItem('pc_tok', S.tok);
+          S.signup = false; S.tok = r.token; S.user = r.user; localStorage.setItem('pc_tok', S.tok);
           go(RANK[S.user.role] >= RANK.manager ? '#/' : '#/home'); render();
         } catch (ex) { err.textContent = ex.message; }
       });

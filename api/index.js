@@ -1,5 +1,6 @@
 'use strict';
 // One serverless function handles every /api/* route (keeps us inside Vercel's free function limit).
+const crypto = require('crypto');
 const db = require('./_lib/db');
 const A = require('./_lib/auth');
 const { parseUpi, parseSchedule, parseInvoiceStyle } = require('./_lib/parse');
@@ -62,6 +63,7 @@ async function authed(req, url, min) {
   const u = await db.get('users', p.uid);
   if (!u || u.active === false) throw new HttpErr(401, 'This account is not active');
   if (RANK[u.role] < RANK[min]) throw new HttpErr(403, 'Your role cannot do this');
+  db.setOrg(u.orgId);
   return u;
 }
 
@@ -348,6 +350,24 @@ async function route(req, res) {
     return send(res, 200, { token: A.sign({ uid: u.id }), user: pubUser(u) });
   }
 
+  if (a === 'signup' && m === 'POST') { // a new business creates its own private space
+    const body = await readBody(req);
+    const key = 'signup|' + (req.headers['x-forwarded-for'] || '');
+    if (tooMany(key)) throw new HttpErr(429, 'Too many sign-ups from here. Try again later.');
+    const biz = String(body.business || '').trim().slice(0, 80), username = lc(body.username);
+    if (!biz) throw new HttpErr(400, 'Enter your business name');
+    if (!String(body.name || '').trim() || !/^[a-z0-9._-]{3,30}$/.test(username)) throw new HttpErr(400, 'Enter your name and a username (3 to 30 letters or numbers)');
+    if (String(body.password || '').length < 8) throw new HttpErr(400, 'Password must be at least 8 characters');
+    if ((await db.allGlobal('users')).some(x => x.username === username)) throw new HttpErr(409, 'That username is taken. Please choose another.');
+    if (!fails.has(key)) fails.set(key, []); fails.get(key).push(Date.now());
+    const org = 'org_' + crypto.randomBytes(6).toString('hex');
+    db.setOrg(org);
+    await db.insert('settings', { id: 'main', businessName: biz, business: { name: biz }, noDemo: true });
+    const u = await db.insert('users', { name: String(body.name).trim(), username, role: 'owner', active: true, pw: A.hashPassword(body.password) });
+    await audit(u, 'signup', 'user', u.id, 'New business: ' + biz);
+    return send(res, 200, { token: A.sign({ uid: u.id }), user: pubUser(u) });
+  }
+
   if (a === 'login' && m === 'POST') {
     await ensureSeed();
     const body = await readBody(req);
@@ -356,6 +376,7 @@ async function route(req, res) {
     if (tooMany(key)) throw new HttpErr(429, 'Too many attempts. Try again in a few minutes.');
     const u = (await db.all('users')).find(x => x.username === uname && x.active !== false);
     if (!u || !A.verifyPassword(body.password, u.pw)) { fails.get(key).push(Date.now()); throw new HttpErr(401, 'Wrong username or password'); }
+    db.setOrg(u.orgId);
     await audit(u, 'login', 'user', u.id, '');
     return send(res, 200, { token: A.sign({ uid: u.id }), user: pubUser(u) });
   }
@@ -372,7 +393,7 @@ async function route(req, res) {
       if (!body.name || !/^[a-z0-9._-]{3,30}$/.test(username)) throw new HttpErr(400, 'Name and a username (3 to 30 letters or numbers) are required');
       if (String(body.password || '').length < 8) throw new HttpErr(400, 'Password must be at least 8 characters');
       if (!RANK[body.role]) throw new HttpErr(400, 'Choose a role');
-      if ((await db.all('users')).some(x => x.username === username)) throw new HttpErr(409, 'That username is taken');
+      if ((await db.allGlobal('users')).some(x => x.username === username)) throw new HttpErr(409, 'That username is taken');
       const u = await db.insert('users', { name: String(body.name).trim(), username, role: body.role, active: true, pw: A.hashPassword(body.password) });
       await audit(me, 'user_created', 'user', u.id, `${u.username} as ${u.role}`);
       return send(res, 200, { user: pubUser(u) });
@@ -1055,12 +1076,12 @@ async function route(req, res) {
   throw new HttpErr(404, 'Not found');
 }
 
-module.exports = async (req, res) => {
+module.exports = (req, res) => db.run(async () => {
   try { await route(req, res); }
   catch (e) {
     if (e instanceof HttpErr) return send(res, e.code, { error: e.message, ...(e.extra || {}) });
     console.error(e);
     return send(res, 500, { error: 'Something went wrong. Please try again.' });
   }
-};
+});
 module.exports.route = route;

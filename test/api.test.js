@@ -327,6 +327,27 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
     g = await call('GET', 'settings', null, ow); ok('"no invoices" choice is kept when tax is not applicable', g.j.settings.business.noInvoice === true);
     await call('PUT', 'settings', { business: { name: 'Acme', address: 'x', taxId: '1', taxNA: false, noInvoice: true } }, ow);
     g = await call('GET', 'settings', null, ow); ok('"no invoices" is dropped when GST applies', g.j.settings.business.noInvoice === false); }
+  { // each business has its own private space
+    let sa = await call('POST', 'signup', { business: 'Alpha Studio', name: 'Asha', username: 'asha.owner', password: 'alphapass1' });
+    ok('a new business can sign up and becomes its owner', sa.s === 200 && sa.j.user.role === 'owner' && !!sa.j.token, JSON.stringify(sa.j));
+    const ta = sa.j.token;
+    const sb2 = await call('POST', 'signup', { business: 'Beta Traders', name: 'Bala', username: 'bala.owner', password: 'betapass12' }); const tb = sb2.j.token;
+    ok('a second business signs up', sb2.s === 200 && !!tb);
+    ok('username is unique across businesses', (await call('POST', 'signup', { business: 'Gamma', name: 'G', username: 'asha.owner', password: 'gammapass1' })).s === 409);
+    ok('weak password refused', (await call('POST', 'signup', { business: 'Gamma', name: 'G', username: 'gamma.owner', password: 'short' })).s === 400);
+    let ua = await call('GET', 'users', null, ta); ok('new business sees only its own owner (no demo users)', ua.j.users.length === 1 && ua.j.users[0].username === 'asha.owner', JSON.stringify(ua.j));
+    const oa = await call('GET', 'orders', null, ta); ok('new business starts with no orders', (oa.j.orders || oa.j || []).length === 0, JSON.stringify(oa.j).slice(0, 120));
+    await call('PUT', 'settings', { business: { name: 'Alpha Studio', address: 'A road', taxNA: true, invoiceAns: 'no', gstRate: 'Not registered' } }, ta);
+    const sga = await call('GET', 'settings', null, ta), sgb = await call('GET', 'settings', null, tb), sgm = await call('GET', 'settings', null, ow);
+    ok('settings are separate per business', sga.j.settings.business.name === 'Alpha Studio' && sgb.j.settings.business.name === 'Beta Traders' && sgm.j.settings.business.name !== 'Alpha Studio' && sgm.j.settings.business.name !== 'Beta Traders', JSON.stringify([sga.j.settings.business.name, sgb.j.settings.business.name, sgm.j.settings.business.name]));
+    const ia = (await call('POST', 'images', { dataUrl: PNG }, ta)).j.id;
+    const ga = await fetch(base + '/api/images/' + ia + '?t=' + tb); ok("another business cannot open this business's image", ga.status === 404, String(ga.status));
+    ok('the original business cannot see the new users', (await call('GET', 'users', null, ow)).j.users.every(x => x.username !== 'asha.owner' && x.username !== 'bala.owner'));
+    const lg = await call('POST', 'login', { username: 'bala.owner', password: 'betapass12' }); ok('new business owner can sign in again', lg.s === 200 && !!lg.j.token);
+    const addU = await call('POST', 'users', { name: 'Ravi', username: 'ravi.up', password: 'ravipass12', role: 'uploader' }, ta);
+    ok('owner adds a team member inside own business', addU.s === 200);
+    ok("other business cannot see that team member", (await call('GET', 'users', null, tb)).j.users.every(x => x.username !== 'ravi.up'));
+    ok('a username used in one business cannot be reused in another', (await call('POST', 'users', { name: 'R2', username: 'ravi.up', password: 'ravipass12', role: 'uploader' }, tb)).s === 409); }
   { // invoice per payment
     await call('PUT', 'settings', { business: { name: 'Acme', address: 'x', taxId: '1', gstRate: 'GST registered (regular)', gstMode: 'excl', gstPct: '18', invoiceMode: 'payment' } }, ow);
     const ol = await call('GET', 'orders', null, ow); const oc = (ol.j.orders || ol.j || []).find ? (ol.j.orders || ol.j).find(x => x.code) : null;
@@ -350,8 +371,9 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
     ok('backup has no passwords', r2.j.tables.users.every(u => u.pw === undefined || u.pw === '[removed]') && !JSON.stringify(r2.j).includes('demo1234'));
     r2 = await call('POST', 'data/start-fresh', { confirm: 'yes' }, ow); ok('start fresh needs the typed words', r2.s === 409 && r2.j.needConfirm === true);
     r2 = await call('POST', 'data/start-fresh', { confirm: 'START FRESH' }, ow); ok('start fresh removes everything', r2.s === 200 && r2.j.removed.orders > 0 && r2.j.removed.users >= 3, JSON.stringify(r2.j));
-    r2 = await call('GET', 'health'); ok('after start fresh: no demo, setup needed', r2.j.needsSetup === true && r2.j.demo === false, JSON.stringify(r2.j));
-    r2 = await call('GET', 'health'); ok('the demo accounts do not come back', r2.j.needsSetup === true && r2.j.demo === false);
+    r2 = await call('GET', 'health'); ok('after start fresh: no demo accounts (other businesses keep their own data)', r2.j.demo === false, JSON.stringify(r2.j));
+    r2 = await call('GET', 'health'); ok('the demo accounts do not come back', r2.j.demo === false && (await call('POST', 'login', { username: 'owner', password: 'demo1234' })).s === 401);
+    ok('other businesses are untouched by start fresh', (await call('POST', 'login', { username: 'bala.owner', password: 'betapass12' })).s === 200);
   }
   console.log(bad ? '\n' + bad + ' FAILED' : '\nALL API TESTS PASSED');
   srv.close(); mock.close(); process.exit(bad ? 1 : 0);
