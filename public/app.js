@@ -396,7 +396,7 @@ async function setupSteps() {
   return [
     { done: !!((b.name || st.businessName) && b.address && b.gstRate && (b.taxId || b.taxNA) && (b.gstRate !== 'GST registered (regular)' || (b.gstMode && b.gstPct !== ''))), t: 'Business details', d: 'Name, address and GST or tax number (they print on invoices)', go: '#/settings' },
     { done: (st.accounts || []).length > 0, t: 'Bank accounts', d: 'Where your payments arrive, so bank statements can be matched', go: '#/settings' },
-    { done: us.some(u => u.role !== 'owner' && u.active !== false), t: 'Your team', d: 'Add the uploaders and managers who will use the app', go: '#/team' }
+    { done: us.some(u => u.role !== 'owner' && u.active !== false), t: 'Add your team', d: 'Add the uploaders and managers who will use the app', go: '#/team' }
   ];
 }
 // A banner that stays on every page until the owner has finished the three set-up steps.
@@ -404,7 +404,7 @@ function setupBanner() {
   const st = S.setupSteps; if (!st || S.setupDone || !S.user || S.user.role !== 'owner') return '';
   const left = st.filter(x => !x.done); if (!left.length) return '';
   const pct = Math.round(100 * (st.length - left.length) / st.length);
-  return `<div class="note warn" style="border-radius:0;display:flex;gap:14px;align-items:center;justify-content:center;flex-wrap:wrap;text-align:left"><span><b>Your business set-up is ${pct}% complete.</b> Get to 100% to start using the app. Still to do: ${left.map(x => esc(x.t.toLowerCase())).join(', ')}.</span><span aria-hidden="true" style="display:inline-block;width:120px;height:8px;border-radius:4px;background:#E3E6EA;overflow:hidden"><span style="display:block;height:100%;width:${pct}%;background:var(--acc,#0A7)"></span></span><a class="btn s p" href="${left[0].go}">Start with ${esc(left[0].t.toLowerCase())}</a></div>`;
+  return `<div class="note warn" style="border-radius:0;display:flex;gap:14px;align-items:center;justify-content:center;flex-wrap:wrap;text-align:left"><span><b>Your business set-up is ${pct}% complete.</b> Get to 100% to start using the app. Still to do: ${left.map(x => esc(x.t.toLowerCase())).join(', ')}.</span><span aria-hidden="true" style="display:inline-block;width:120px;height:8px;border-radius:4px;background:#E3E6EA;overflow:hidden"><span style="display:block;height:100%;width:${pct}%;background:var(--acc,#0A7)"></span></span><a class="btn s p" href="${left[0].go}">Next: ${esc(left[0].t.toLowerCase())}</a></div>`;
 }
 async function setupPrompt() {
   if (S.setupChecked || !S.user || S.user.role !== 'owner') return;
