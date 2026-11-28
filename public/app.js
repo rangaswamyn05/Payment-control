@@ -83,7 +83,7 @@ function confirmBox({ title, text, ok = 'Confirm', danger }) {
 }
 const imgUrl = id => `/api/images/${encodeURIComponent(id)}?t=${encodeURIComponent(S.tok)}`;
 
-function logout() { S.tok = ''; S.user = null; S.savedAt = ''; S.setupChecked = false; try { sessionStorage.removeItem('pc_setup_seen'); } catch (e) { /* ignore */ } localStorage.removeItem('pc_tok'); S.add = null; location.hash = '#/login'; render(); }
+function logout() { S.tok = ''; S.user = null; S.savedAt = ''; S.setupChecked = false; S.setupDone = false; S.setupSteps = null; try { sessionStorage.removeItem('pc_setup_seen'); } catch (e) { /* ignore */ } localStorage.removeItem('pc_tok'); S.add = null; location.hash = '#/login'; render(); }
 const go = h => { location.hash = h; };
 function backBtn(fallback) { return `<button class="back" data-act="back" data-fallback="${fallback || '#/'}">${ICON.back}Back</button>`; }
 
@@ -98,7 +98,7 @@ function shell(active, inner) {
   if (u.builder) items.push(['#/builder', 'Builder', 'Every business\'s feedback and usage numbers, in one place. Only you see this.']);
   items.push(['#/box', mgr ? 'Fix my business' : 'Feedback', mgr ? 'Describe a business problem or upload your flow, and we come back with a solution.' : 'Tell us what works and what does not.']);
   const nav = items.map(([h, t, hint]) => `<a href="${h}" class="${active === h ? 'on' : ''}${h === '#/box' ? ' hl' : ''}"${hint ? ` data-tip="${hint}"` : ''}>${h === '#/box' ? '✨ ' : ''}${t}</a>`).join('');
-  return `<header class="top"><div class="brand"><div class="logo">${ICON.shield}</div><span>Payment Control</span></div><nav class="nav" aria-label="Main">${nav}</nav><div class="me"><div style="text-align:right"><div style="font-weight:600">${esc(u.name)}</div><div class="muted" style="font-size:12px;text-transform:capitalize">${esc(u.role)} · <a href="#/login" data-act="logout" style="text-decoration:underline">Sign out</a></div></div><div class="av">${esc(u.name[0] || '?')}</div></div></header>${S.health && S.health.db === 'memory' ? '<div class="note warn" style="border-radius:0;text-align:center">Demo storage: data is not saved permanently until the database is connected.</div>' : ''}<main class="wrap">${inner}</main>`;
+  return `<header class="top"><div class="brand"><div class="logo">${ICON.shield}</div><span>Payment Control</span></div><nav class="nav" aria-label="Main">${nav}</nav><div class="me"><div style="text-align:right"><div style="font-weight:600">${esc(u.name)}</div><div class="muted" style="font-size:12px;text-transform:capitalize">${esc(u.role)} · <a href="#/login" data-act="logout" style="text-decoration:underline">Sign out</a></div></div><div class="av">${esc(u.name[0] || '?')}</div></div></header>${S.health && S.health.db === 'memory' ? '<div class="note warn" style="border-radius:0;text-align:center">Demo storage: data is not saved permanently until the database is connected.</div>' : ''}${setupBanner()}<main class="wrap">${inner}</main>`;
 }
 
 // ---------- views ----------
@@ -381,6 +381,8 @@ async function render() {
   } catch (ex) { if (my !== rid) return; v = { active: '', html: `<div class="note bad">${esc(ex.message)}</div><p><a class="btn" href="#/">Back to start</a></p>` }; }
   if (my !== rid || !S.user) return;
   if (!S.badgeLoaded) { S.badgeLoaded = true; loadBadges(); }
+  if (S.user.role === 'owner' && !S.setupDone) { try { S.setupSteps = await setupSteps(); if (S.setupSteps.every(x => x.done)) S.setupDone = true; } catch (e) { /* banner is a convenience */ } }
+  if (my !== rid) return;
   $app.innerHTML = shell(v.active, v.html);
   if (S.lastHash !== location.hash) { window.scrollTo(0, 0); S.lastHash = location.hash; }
   if (v.after) v.after();
@@ -388,18 +390,28 @@ async function render() {
   setupPrompt();
 }
 // First sign-in for the owner: a short "Set up your business" checklist, shown until the basics are filled in
+async function setupSteps() {
+  const st = (await api('GET', 'settings')).settings, us = (await api('GET', 'users')).users;
+  const b = st.business || {};
+  return [
+    { done: !!((b.name || st.businessName) && b.address && b.gstRate && (b.taxId || b.taxNA) && (b.gstRate !== 'GST registered (regular)' || (b.gstMode && b.gstPct !== ''))), t: 'Business details', d: 'Name, address and GST or tax number (they print on invoices)', go: '#/settings' },
+    { done: (st.accounts || []).length > 0, t: 'Bank accounts', d: 'Where your payments arrive, so bank statements can be matched', go: '#/settings' },
+    { done: us.some(u => u.role !== 'owner' && u.active !== false), t: 'Your team', d: 'Add the uploaders and managers who will use the app', go: '#/team' }
+  ];
+}
+// A banner that stays on every page until the owner has finished the three set-up steps.
+function setupBanner() {
+  const st = S.setupSteps; if (!st || S.setupDone || !S.user || S.user.role !== 'owner') return '';
+  const left = st.filter(x => !x.done); if (!left.length) return '';
+  const pct = Math.round(100 * (st.length - left.length) / st.length);
+  return `<div class="note warn" style="border-radius:0;display:flex;gap:14px;align-items:center;justify-content:center;flex-wrap:wrap;text-align:left"><span><b>Your business set-up is ${pct}% complete.</b> Get to 100% to start using the app. Still to do: ${left.map(x => esc(x.t.toLowerCase())).join(', ')}.</span><span aria-hidden="true" style="display:inline-block;width:120px;height:8px;border-radius:4px;background:#E3E6EA;overflow:hidden"><span style="display:block;height:100%;width:${pct}%;background:var(--acc,#0A7)"></span></span><a class="btn s p" href="${left[0].go}">Start with ${esc(left[0].t.toLowerCase())}</a></div>`;
+}
 async function setupPrompt() {
   if (S.setupChecked || !S.user || S.user.role !== 'owner') return;
   S.setupChecked = true;
   try { if (sessionStorage.getItem('pc_setup_seen') === '1') return; } catch (e) { /* storage blocked: show it */ }
   try {
-    const st = (await api('GET', 'settings')).settings, us = (await api('GET', 'users')).users;
-    const b = st.business || {};
-    const steps = [
-      { done: !!((b.name || st.businessName) && b.address && b.gstRate && (b.taxId || b.taxNA) && (b.gstRate !== 'GST registered (regular)' || (b.gstMode && b.gstPct !== ''))), t: 'Business details', d: 'Name, address and GST or tax number (they print on invoices)', go: '#/settings' },
-      { done: (st.accounts || []).length > 0, t: 'Bank accounts', d: 'Where your payments arrive, so bank statements can be matched', go: '#/settings' },
-      { done: us.some(u => u.role !== 'owner' && u.active !== false), t: 'Your team', d: 'Add the uploaders and managers who will use the app', go: '#/team' }
-    ];
+    const steps = S.setupSteps || await setupSteps();
     if (steps.every(x => x.done)) return;
     try { sessionStorage.setItem('pc_setup_seen', '1'); } catch (e) { /* ignore */ }
     const nx = steps.findIndex(x => !x.done);

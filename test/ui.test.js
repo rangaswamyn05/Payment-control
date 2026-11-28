@@ -185,6 +185,7 @@ fs.mkdirSync('/tmp/pcshots', { recursive: true });
   await pg.fill('#bz', 'Sunrise Studio'); await pg.fill('#nm', 'Meera'); await pg.fill('#un', 'meera.owner'); await pg.fill('#pw', 'meerapass1'); await pg.click('button[type=submit]');
   await pg.waitForSelector('.top');
   ok('new business owner is signed in', (await pg.textContent('.me')).includes('Meera'));
+  await pg.waitForSelector('.note.warn:has-text("set-up is")'); ok('a set-up banner with a percentage stays on the page for a new business owner', /0% complete.*100%.*business details.*bank accounts.*your team/.test(await pg.textContent('.note.warn:has-text("set-up is")')));
   await pg.goto(base + '/#/settings'); await pg.waitForSelector('#bz');
   ok('their business name is already filled in', await pg.inputValue('#bz') === 'Sunrise Studio');
   await pg.goto(base + '/#/orders'); await pg.waitForTimeout(600);
