@@ -95,6 +95,7 @@ function shell(active, inner) {
   items.push(['#/add', 'Add payment', 'For a later instalment on an order that already exists.'], ['#/mine', mgr ? 'My entries' : 'My submissions', mgr ? 'Payments you entered yourself, with their status.' : 'The orders and payments you have sent in, with their status.'], ['#/inbox', 'Inbox' + (S.unread ? `<span class="pill">${S.unread}</span>` : ''), 'Updates for you: approvals, changes asked for and alerts.']);
   if (mgr) items.push(['#/audit', 'Audit log']);
   if (u.role === 'owner') items.push(['#/reports', 'Reports'], ['#/team', 'Team'], ['#/settings', 'Settings']);
+  if (u.builder) items.push(['#/builder', 'Builder', 'Every business\'s feedback and usage numbers, in one place. Only you see this.']);
   items.push(['#/box', mgr ? 'Fix my business' : 'Feedback', mgr ? 'Describe a business problem or upload your flow, and we come back with a solution.' : 'Tell us what works and what does not.']);
   const nav = items.map(([h, t, hint]) => `<a href="${h}" class="${active === h ? 'on' : ''}${h === '#/box' ? ' hl' : ''}"${hint ? ` data-tip="${hint}"` : ''}>${h === '#/box' ? '✨ ' : ''}${t}</a>`).join('');
   return `<header class="top"><div class="brand"><div class="logo">${ICON.shield}</div><span>Payment Control</span></div><nav class="nav" aria-label="Main">${nav}</nav><div class="me"><div style="text-align:right"><div style="font-weight:600">${esc(u.name)}</div><div class="muted" style="font-size:12px;text-transform:capitalize">${esc(u.role)} · <a href="#/login" data-act="logout" style="text-decoration:underline">Sign out</a></div></div><div class="av">${esc(u.name[0] || '?')}</div></div></header>${S.health && S.health.db === 'memory' ? '<div class="note warn" style="border-radius:0;text-align:center">Demo storage: data is not saved permanently until the database is connected.</div>' : ''}<main class="wrap">${inner}</main>`;
@@ -280,6 +281,20 @@ async function viewAudit() {
   return { active: '#/audit', html: `<div class="head"><div><h1>Audit log</h1><div class="muted">Every change, with who made it and when. Newest first.</div></div></div><div class="card"><div class="tbl"><div class="tr h" style="min-width:700px"><div class="c" style="flex:1.3">When</div><div class="c" style="flex:1.4">Who</div><div class="c" style="flex:1.4">Action</div><div class="c1">Details</div></div>${rows}</div></div>` };
 }
 
+async function viewBuilder() {
+  const d = await api('GET', 'builder'), m = d.metrics, n = x => (x === null || x === undefined ? 'n/a' : x);
+  const dt = t => t ? new Date(t).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '';
+  const tile = (big, small) => `<div class="card" style="padding:14px;flex:1;min-width:150px"><div style="font-size:24px;font-weight:700">${big}</div><div class="muted" style="font-size:13px">${small}</div></div>`;
+  const biz = d.businesses.map(b => `<div class="tr" style="min-width:700px"><div class="c" style="flex:1.6"><b>${esc(b.name)}</b><div class="muted" style="font-size:12px">${esc([b.kind, b.industry].filter(Boolean).join(' · '))}</div></div><div class="c">${b.team}</div><div class="c">${b.orders}</div><div class="c">${b.payments}</div><div class="c">${b.feedback}</div><div class="c">${dt(b.signedUp)}</div><div class="c">${dt(b.lastActive)}</div></div>`).join('');
+  const fb = d.feedback.map(f => `<div style="border-top:1px solid #EEF2F6;padding:10px 0"><div style="font-size:13px" class="muted"><b style="color:#1B2733">${esc(f.business)}</b> · ${esc(f.by)} · ${dt(f.created)} ${f.rating === 'up' ? '👍' : f.rating === 'down' ? '👎' : ''} ${f.type === 'problem' ? '· business problem' : ''} ${f.label ? '· ' + esc(f.label) : ''}</div><div>${esc(f.text)}</div>${f.manualSteps ? `<div class="muted" style="font-size:13px">Their steps today: ${esc(f.manualSteps)}</div>` : ''}</div>`).join('') || '<div class="muted">No feedback yet.</div>';
+  const edits = m.fieldEdits.map(e => `${esc(e.field)} ${e.n}`).join(' · ');
+  return { active: '#/builder', html: `<div class="head"><div><h1>Builder</h1><div class="muted">All businesses together. Numbers come from real use, so they mean more as more businesses use the app.</div></div></div>
+  <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">${tile(d.businesses.length, 'businesses signed up')}${tile(d.feedback.length, 'feedback notes')}${tile(`${d.ups} 👍 / ${d.downs} 👎`, 'thumbs')}</div>
+  <div class="card" style="margin-bottom:14px"><h2 style="margin-bottom:8px">How the reader is doing</h2><div style="display:flex;gap:12px;flex-wrap:wrap">${tile(m.screenshots, 'payment screenshots')}${tile(m.timed ? m.medianReadSec + ' s' : 'n/a', 'median time to read one (' + m.timed + ' timed)')}${tile(n(m.editedPct) + (m.editedPct === null ? '' : '%'), 'had a field fixed or filled by hand')}${tile(n(m.amountConfirmPct) + (m.amountConfirmPct === null ? '' : '%'), 'amount needed a confirm tap')}${tile(m.readsConfident + ' / ' + m.readsLow, 'high / low confidence reads')}${tile(n(m.statementMatchPct) + (m.statementMatchPct === null ? '' : '%'), 'matched on the bank statement (' + m.statementMatched + ' of ' + m.statementChecked + ' checked)')}</div><div class="muted" style="font-size:13px;margin-top:8px">Fields fixed by hand: ${edits}. Payments entered before this view existed have no timing.</div></div>
+  <div class="card" style="margin-bottom:14px"><h2 style="margin-bottom:8px">Businesses</h2><div class="tbl"><div class="tr h" style="min-width:700px"><div class="c" style="flex:1.6">Business</div><div class="c">Team</div><div class="c">Orders</div><div class="c">Payments</div><div class="c">Feedback</div><div class="c">Signed up</div><div class="c">Last active</div></div>${biz}</div></div>
+  <div class="card"><h2 style="margin-bottom:4px">All feedback</h2>${fb}</div>` };
+}
+
 // Who can do what. Shown on the Team page and on first-time setup.
 function rolesCard(compact) {
   const r = (t, who, items) => `<div style="border-top:1px solid #EEF2F6;padding:12px 0"><b>${t}</b> <span class="muted" style="font-size:13px">${who}</span><ul style="margin:6px 0 0 18px;padding:0;font-size:14px;line-height:1.5">${items.map(x => `<li>${x}</li>`).join('')}</ul></div>`;
@@ -358,6 +373,7 @@ async function render() {
     else if (a === 'review') v = await viewReview();
     else if (a === 'statement') v = await viewStatement();
     else if (a === 'audit') v = await viewAudit();
+    else if (a === 'builder' && S.user.builder) v = await viewBuilder();
     else if (a === 'team' && owner) v = await viewTeam();
     else if (a === 'settings' && owner) v = await viewSettings();
     else if (a === 'reports' && owner) v = await viewReports();

@@ -152,6 +152,9 @@ fs.mkdirSync('/tmp/pcshots', { recursive: true });
   ok('clear asks to download the report first', /Download the report first/.test(await pg.textContent('.toast')));
   await pg.goto(base + '/#/audit'); await pg.waitForSelector('.tr:not(.h)');
   ok('audit log shows entries', (await pg.locator('.tr:not(.h)').count()) > 5);
+  await pg.goto(base + '/#/builder'); await pg.waitForSelector('h1:has-text("Builder")');
+  ok('builder page shows all businesses, the reader numbers and feedback', /How the reader is doing/.test(await pg.textContent('main')) && /All feedback/.test(await pg.textContent('main')));
+  await pg.screenshot({ path: '/tmp/pcshots/builder.png' });
   await pg.close();
 
   // ---- sales finds an order by phone number

@@ -35,7 +35,8 @@ async function readBody(req) {
   try { return JSON.parse(s); } catch (e) { throw new HttpErr(400, 'Bad request'); }
 }
 
-const pubUser = u => ({ id: u.id, name: u.name, username: u.username, role: u.role, active: u.active !== false });
+const isBuilder = u => u.role === 'owner' && (u.orgId || 'main') === 'main'; // the person who built the app: sees every business's feedback and usage
+const pubUser = u => ({ id: u.id, name: u.name, username: u.username, role: u.role, active: u.active !== false, ...(isBuilder(u) ? { builder: true } : {}) });
 
 async function audit(me, action, entity, entityId, detail) {
   try { await db.insert('audit', { at: new Date().toISOString(), by: me ? me.name + ' (' + me.role + ')' : 'system', byId: me ? me.id : null, action, entity, entityId, detail: String(detail || '').slice(0, 400) }); } catch (e) { /* never block the action */ }
@@ -255,6 +256,9 @@ async function addPayment(me, order, body, opts = {}) {
     orderCode: order.code, mode, amount, date, txnId, seq, seqReason, payer: String(body.payer || '').trim().slice(0, 80), payee: String(body.payee || '').trim().slice(0, 80),
     imageId: body.imageId || '', note: String(body.note || '').slice(0, 200), status, reason, approval,
     createdBy: me.id, createdByName: me.name, ocr: body.ocr ? String(body.ocr).slice(0, 20) : '',
+    readMs: Number(body.readMs) > 0 && Number(body.readMs) < 600000 ? Math.round(Number(body.readMs)) : 0,
+    edited: Array.isArray(body.edited) ? body.edited.filter(x => ['amount', 'date', 'txnId', 'payer', 'payee'].includes(x)).slice(0, 5) : [],
+    amtConfirm: body.amtConfirm === true,
     attention: notices.length > 0 && !notices[0].startsWith('This payment is above') ? true : !!(lim > 0 && amount > lim),
   });
   await audit(me, 'payment_added', 'payment', p.id, `${order.code} #${seq} ${mode} ${amount} ${status}${seqReason ? '. Out of order: ' + seqReason : ''}`);
@@ -1064,6 +1068,36 @@ async function route(req, res) {
     const unmatchedCredits = rows.filter((r, i) => !used.has(i));
     await audit(me, 'statement_checked', 'statement', from + ' to ' + to, `${rows.length} credits, ${matched.length} matched, ${flagged.length} flagged, ${unmatchedCredits.length} credits without a payment record`);
     return send(res, 200, { range: { from, to }, credits: rows.length, matched, flagged, untouched: pays.length - sorted.length, unmatchedCredits: unmatchedCredits.slice(0, 200) });
+  }
+
+
+  // ----- builder view: every business's feedback and usage in one place (only the person who built the app)
+  if (a === 'builder' && m === 'GET') {
+    const me = await authed(req, url, 'owner');
+    if (!isBuilder(me)) throw new HttpErr(403, 'Only the builder can see this');
+    const [users, orders, pays, reqs, sets] = await Promise.all(['users', 'orders', 'payments', 'requests', 'settings'].map(t => db.allGlobal(t)));
+    const orgOf = r => r.orgId || 'main';
+    const nameOf = {}; for (const st of sets) { const o = st.id === 'main' ? 'main' : String(st.id).replace(/^main_/, ''); nameOf[o] = (st.business && st.business.name) || st.businessName || ''; }
+    const orgs = [...new Set([...users.map(orgOf), ...sets.map(st => st.id === 'main' ? 'main' : String(st.id).replace(/^main_/, ''))])];
+    const median = a => { const x = a.filter(n => n > 0).sort((p, q) => p - q); return x.length ? x[Math.floor(x.length / 2)] : 0; };
+    const businesses = orgs.map(o => {
+      const st = sets.find(x => (x.id === 'main' ? 'main' : String(x.id).replace(/^main_/, '')) === o) || {}, b = st.business || {};
+      const us = users.filter(u => orgOf(u) === o), ps = pays.filter(p => orgOf(p) === o);
+      const last = [...ps.map(p => p.created), ...us.map(u => u.created)].filter(Boolean).sort().pop() || '';
+      return { org: o, name: nameOf[o] || '(no name)', kind: b.kind || '', industry: b.industry || '', team: us.length, orders: orders.filter(x => orgOf(x) === o).length, payments: ps.length, signedUp: (us.find(u => u.role === 'owner') || us[0] || {}).created || '', lastActive: last, feedback: reqs.filter(r => r.kind === 'idea' && orgOf(r) === o).length };
+    });
+    const real = pays.filter(p => p.imageId && p.mode !== 'cash'), timed = real.filter(p => p.readMs > 0);
+    const judged = pays.filter(p => p.mode !== 'cash' && (p.verifyMethod === 'statement' || p.stmtUnableAt));
+    const pct = (n, d) => d ? Math.round(n * 1000 / d) / 10 : null;
+    const metrics = {
+      screenshots: real.length, timed: timed.length, medianReadSec: Math.round(median(timed.map(p => p.readMs)) / 100) / 10,
+      readsConfident: real.filter(p => p.ocr === 'high').length, readsLow: real.filter(p => p.ocr === 'low').length,
+      editedPct: pct(real.filter(p => (p.edited || []).length).length, real.length), amountConfirmPct: pct(real.filter(p => p.amtConfirm).length, real.length),
+      fieldEdits: ['amount', 'date', 'txnId', 'payer', 'payee'].map(f => ({ field: f, n: real.filter(p => (p.edited || []).includes(f)).length })),
+      statementChecked: judged.length, statementMatched: judged.filter(p => p.verifyMethod === 'statement').length, statementMatchPct: pct(judged.filter(p => p.verifyMethod === 'statement').length, judged.length),
+    };
+    const fb = reqs.filter(r => r.kind === 'idea').reverse().map(r => ({ id: r.id, business: nameOf[orgOf(r)] || '(no name)', by: r.by, role: r.byRole || '', type: r.type, label: r.label || '', rating: r.rating || '', text: r.text, manualSteps: r.manualSteps || '', created: r.created, status: r.status }));
+    return send(res, 200, { businesses, metrics, feedback: fb, ups: fb.filter(f => f.rating === 'up').length, downs: fb.filter(f => f.rating === 'down').length });
   }
 
   // ----- audit log

@@ -82,7 +82,7 @@ async function downscale(file, max = 2000, q = 0.85) {
 }
 async function readShot(P, file, redraw) {
   if (!file.type.startsWith('image/')) { toast('Please drop a screenshot or photo (an image).', true); return; }
-  P.busy = true; P.ocrMsg = ''; P.err = '';
+  P.busy = true; P.ocrMsg = ''; P.err = ''; const t0r = Date.now();
   try {
     P.preview = await downscale(file); redraw();
     const { id } = await api('POST', 'images', { dataUrl: P.preview }); P.imageId = id;
@@ -98,7 +98,7 @@ async function readShot(P, file, redraw) {
       if (p.txnId) P.txnId = p.txnId;
       if (p.payer) P.payer = p.payer; if (p.payee) P.payee = p.payee;
       if (p.mode === 'transfer' && P.mode === 'upi') P.mode = 'transfer';
-      P.ocr = p.confidence;
+      P.ocr = p.confidence; P.readMs = Date.now() - t0r; P.read = { amount: String(P.amount || ''), date: String(P.date || ''), txnId: String(P.txnId || ''), payer: String(P.payer || ''), payee: String(P.payee || '') }; P.amtConfirm = !!(P.amtAlts && P.amtAlts.length);
       if (P.onRead) P.onRead(p);
       P.ocrMsg = !p.amount && !p.txnId && P.mode !== 'cash' ? 'We could not find a payment in this image. Please upload the screenshot from your payment app, or type the details yourself.' : !p.txnId && P.mode !== 'cash' ? 'No transaction ID on this screenshot. Without it this cannot be saved. In GPay or PhonePe open the payment details (View details) and screenshot that, or type the ID.' : p.confidence === 'low' ? 'We could only read a little. Please check every field.' : 'We read these details. Please check them.';
     }
@@ -112,7 +112,7 @@ function payCheck(P) {
   if (P.mode !== 'cash' && !String(P.txnId).trim()) return (P.mode === 'cheque' ? 'No cheque number. Type it from the photo, or use a photo that shows it.' : P.mode === 'card' ? 'No payment ID. Type it from the receipt, or use a screenshot that shows it.' : 'No transaction ID. Type it from the screenshot, or use a screenshot that shows it.');
   return '';
 }
-const payBody = P => ({ mode: P.mode, amount: String(P.amount).replace(/,/g, ''), date: (P.date || P.today) + (P.date && P.time ? 'T' + P.time : ''), txnId: P.txnId, payer: P.payer, payee: P.payee, imageId: P.imageId, ocr: P.ocr });
+const payBody = P => ({ mode: P.mode, amount: String(P.amount).replace(/,/g, ''), date: (P.date || P.today) + (P.date && P.time ? 'T' + P.time : ''), txnId: P.txnId, payer: P.payer, payee: P.payee, imageId: P.imageId, ocr: P.ocr, readMs: P.readMs || 0, amtConfirm: !!P.amtConfirm, edited: P.read ? ['amount', 'date', 'txnId', 'payer', 'payee'].filter(f => String(f === 'amount' ? String(P.amount).replace(/,/g, '') : P[f] || '').trim() !== String(P.read[f] || '').replace(/,/g, '').trim()) : [] });
 
 // ---------- Add payment (sales) ----------
 function viewAdd() {

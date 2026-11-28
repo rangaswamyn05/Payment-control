@@ -48,7 +48,8 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
   const base1 = { orderCode: 'DEMO-1001', mode: 'upi', amount: 30000, date: '2026-11-25T11:18', txnId: 'T2611251118ABC', imageId: img };
   r = await call('POST', 'payments', { ...base1, imageId: '' }, up); ok('online payment without screenshot refused', r.s === 400);
   r = await call('POST', 'payments', { ...base1, txnId: '' }, up); ok('screenshot with no transaction ID is rejected', r.s === 400 && r.j.needTxn === true);
-  r = await call('POST', 'payments', base1, up); ok('uploader adds payment 1 (next number picked)', r.s === 200 && r.j.payment.seq === 1 && !r.j.payment.needsOwner);
+  r = await call('POST', 'payments', { ...base1, ocr: 'high', readMs: 4200, edited: ['amount', 'bogus'], amtConfirm: true }, up); ok('uploader adds payment 1 (next number picked)', r.s === 200 && r.j.payment.seq === 1 && !r.j.payment.needsOwner);
+  { const bv0 = await call('GET', 'builder', null, ow); ok('reader metrics are recorded from real payments', bv0.j.metrics.timed >= 1 && bv0.j.metrics.medianReadSec === 4.2 && bv0.j.metrics.fieldEdits.find(f => f.field === 'amount').n >= 1 && !bv0.j.metrics.fieldEdits.some(f => f.field === 'bogus') && bv0.j.metrics.amountConfirmPct > 0, JSON.stringify(bv0.j.metrics)); }
   ok('payment event sent to business API with idempotency key', got.length === 2 && got[1].b.order_id === 'DEMO-1001' && got[1].b.amount === 30000 && /:created$/.test(got[1].h['x-idempotency-key']));
   r = await call('POST', 'payments', base1, up); ok('same transaction id refused as duplicate', r.s === 409 && r.j.duplicate === true);
   r = await call('POST', 'payments', { ...base1, mode: 'cheque', txnId: '' }, up); ok('cheque without a cheque number is rejected', r.s === 400 && r.j.needTxn === true);
@@ -330,8 +331,8 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
   { // each business has its own private space
     let sa = await call('POST', 'signup', { business: 'Alpha Studio', name: 'Asha', username: 'asha.owner', password: 'alphapass1' });
     ok('a new business can sign up and becomes its owner', sa.s === 200 && sa.j.user.role === 'owner' && !!sa.j.token, JSON.stringify(sa.j));
-    const ta = sa.j.token;
-    const sb2 = await call('POST', 'signup', { business: 'Beta Traders', name: 'Bala', username: 'bala.owner', password: 'betapass12' }); const tb = sb2.j.token;
+    const ta = sa.j.token; global.__ta = ta;
+    const sb2 = await call('POST', 'signup', { business: 'Beta Traders', name: 'Bala', username: 'bala.owner', password: 'betapass12' }); const tb = sb2.j.token; global.__tb = tb;
     ok('a second business signs up', sb2.s === 200 && !!tb);
     ok('username is unique across businesses', (await call('POST', 'signup', { business: 'Gamma', name: 'G', username: 'asha.owner', password: 'gammapass1' })).s === 409);
     ok('weak password refused', (await call('POST', 'signup', { business: 'Gamma', name: 'G', username: 'gamma.owner', password: 'short' })).s === 400);
@@ -348,6 +349,16 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
     ok('owner adds a team member inside own business', addU.s === 200);
     ok("other business cannot see that team member", (await call('GET', 'users', null, tb)).j.users.every(x => x.username !== 'ravi.up'));
     ok('a username used in one business cannot be reused in another', (await call('POST', 'users', { name: 'R2', username: 'ravi.up', password: 'ravipass12', role: 'uploader' }, tb)).s === 409); }
+  { // builder view: all feedback and numbers in one place, builder only
+    await call('POST', 'ideas', { type: 'feedback', rating: 'down', text: 'Alpha: the amount was misread once' }, global.__ta);
+    await call('POST', 'ideas', { type: 'feedback', rating: 'up', text: 'Beta: quick to add a payment' }, global.__tb);
+    const bv = await call('GET', 'builder', null, ow);
+    ok('builder sees every business', bv.s === 200 && bv.j.businesses.some(b => b.name === 'Alpha Studio') && bv.j.businesses.some(b => b.name === 'Beta Traders'), JSON.stringify(bv.j).slice(0, 200));
+    ok('builder sees feedback from different businesses together', bv.j.feedback.some(f => f.business === 'Alpha Studio' && /misread/.test(f.text)) && bv.j.feedback.some(f => f.business === 'Beta Traders' && f.rating === 'up'), JSON.stringify(bv.j.feedback).slice(0, 300));
+    ok('thumbs are counted', bv.j.ups >= 1 && bv.j.downs >= 1);
+    ok('a new business owner cannot open the builder view', (await call('GET', 'builder', null, global.__ta)).s === 403);
+    ok('the original manager/uploader cannot either', (await call('GET', 'builder', null, up)).s === 403);
+    ok('metrics block is present', bv.j.metrics && typeof bv.j.metrics.screenshots === 'number' && Array.isArray(bv.j.metrics.fieldEdits)); }
   { // invoice per payment
     await call('PUT', 'settings', { business: { name: 'Acme', address: 'x', taxId: '1', gstRate: 'GST registered (regular)', gstMode: 'excl', gstPct: '18', invoiceMode: 'payment' } }, ow);
     const ol = await call('GET', 'orders', null, ow); const oc = (ol.j.orders || ol.j || []).find ? (ol.j.orders || ol.j).find(x => x.code) : null;
