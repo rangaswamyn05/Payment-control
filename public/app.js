@@ -302,10 +302,6 @@ function rolesCard(compact) {
   ${r('Uploader', 'Adds payments.')}
   ${r('Manager', 'Sees balances and confirms cash.')}
   ${r('Owner', 'Manages people and settings.')}</div>`;
-  return `<div class="card" style="margin:0 0 16px;text-align:left"><h2 style="margin-bottom:4px">Who can do what</h2><div class="muted" style="font-size:13px">Three roles. Every payment is checked by the system or a second person, never only by the one who added it.</div>
-  ${r('Uploader', 'sales team', ['Creates orders and adds payments by dropping a screenshot.', 'Sees only their own orders and what is collected and outstanding.', 'Later payments need no approval. They are validated against the bank statement.'])}
-  ${r('Manager', 'finance or operations', ['Approves new orders (can correct the client name or total).', 'Verifies payments the system could not match, and reviews flagged ones.', 'Approves a payment plan that does not match the order. Cash, offline entries, large amounts and anything a manager enters go to the owner.'])}
-  ${r('Owner', 'business owner', ['Approves cash, offline entries and amounts above the limit.', 'Changes order totals and closes orders with an override.', 'Manages people, settings, reports and the audit log.'])}</div>`;
 }
 
 async function viewTeam() {
